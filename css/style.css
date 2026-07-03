@@ -202,7 +202,7 @@ input, textarea { font-family: inherit; }
 /* mindmap */
 .view-mindmap { background: #fafbfc; background-image:
   radial-gradient(circle, #e6e8eb 1px, transparent 1px); background-size: 24px 24px; }
-.mindmap-canvas { width: 100%; height: 100%; cursor: grab; position: relative; overflow: hidden; }
+.mindmap-canvas { position: absolute; inset: 0; cursor: grab; overflow: hidden; }
 .mindmap-canvas.panning { cursor: grabbing; }
 .mindmap-canvas svg { position: absolute; top: 0; left: 0; }
 .mm-toolbar {
