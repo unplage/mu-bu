@@ -34,6 +34,13 @@ console.log('--- Mindmap 渲染 ---');
   assert(nodes.length === 5, '渲染 5 个节点, got ' + nodes.length);
   const edges = container.querySelectorAll('.mm-edge');
   assert(edges.length === 4, '4 条连线(root→A, root→B, A→孙1, A→孙2), got ' + edges.length);
+  // 验证 edge path 不含 NaN(之前的 bug:from.w 为 undefined)
+  for (let i = 0; i < edges.length; i++) {
+    const d = edges[i].getAttribute('d');
+    assert(d && !d.includes('NaN'), `edge[${i}] d 属性无 NaN: ${d}`);
+  }
+  // 验证 edge stroke 颜色有效
+  assert(edges[0].getAttribute('stroke'), 'edge[0] 有 stroke 属性');
 }
 
 console.log('--- Mindmap 折叠子节点 ---');
