@@ -162,5 +162,45 @@ console.log('--- Mindmap 选中态边框 ---');
   assert(rects[0].getAttribute('stroke-width') === '2', '未选中 root 边框宽 2');
 }
 
+console.log('--- Mindmap 节点高度自适应 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = '根';
+  // 短文本节点
+  doc.root.children.push(createNode('短'));
+  // 长文本节点(应换行,高度增大)
+  doc.root.children.push(createNode('这是一个非常非常长的节点文本内容应该会自动换行并增加节点高度'));
+  const container = document.createElement('div');
+  const mm = new Mindmap(container, doc, () => {});
+  mm.render();
+  const rects = container.querySelectorAll('.mm-node-rect');
+  const shortH = parseFloat(rects[1].getAttribute('height'));
+  const longH = parseFloat(rects[2].getAttribute('height'));
+  assert(shortH > 0, '短节点高度 > 0: ' + shortH);
+  assert(longH > shortH, '长节点高度 > 短节点高度 (' + longH + ' > ' + shortH + ')');
+}
+
+console.log('--- Mindmap 字号影响节点尺寸 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = '根';
+  doc.root.children.push(createNode('同文本'));
+  doc.root.children[0].fontSize = 'S';
+  doc.root.children.push(createNode('同文本'));
+  doc.root.children[1].fontSize = 'L';
+  const container = document.createElement('div');
+  const mm = new Mindmap(container, doc, () => {});
+  mm.selectedId = null;
+  mm.render();
+  const rects = container.querySelectorAll('.mm-node-rect');
+  const smallH = parseFloat(rects[1].getAttribute('height'));
+  const largeH = parseFloat(rects[2].getAttribute('height'));
+  assert(largeH > smallH, '大字号节点更高 (' + largeH + ' > ' + smallH + ')');
+  // 宽度也应不同
+  const smallW = parseFloat(rects[1].getAttribute('width'));
+  const largeW = parseFloat(rects[2].getAttribute('width'));
+  assert(largeW >= smallW, '大字号节点宽度 >= 小字号 (' + largeW + ' >= ' + smallW + ')');
+}
+
 console.log(`\n=== Mindmap 测试: ${pass} passed, ${fail} failed ===`);
 process.exit(fail ? 1 : 0);
