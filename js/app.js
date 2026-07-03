@@ -118,16 +118,19 @@ class App {
   }
 
   switchView(view) {
+    const prev = this.view;
     this.view = view;
     this.el.viewOutline.classList.toggle('active', view === 'outline');
     this.el.viewMindmap.classList.toggle('active', view === 'mindmap');
     this.el.outlineView.hidden = view !== 'outline';
     this.el.mindmapView.hidden = view !== 'mindmap';
+    // 切换到的视图同步最新 doc(双向同步)
     if (view === 'mindmap' && this.mindmap) {
       this.mindmap.setDoc(this.doc);
       this._updateMindmapStatus();
-      // 让容器获焦以接收键盘事件
       requestAnimationFrame(() => this.el.mindmapCanvas.focus());
+    } else if (view === 'outline' && this.outliner) {
+      this.outliner.setDoc(this.doc);
     }
   }
 
@@ -241,9 +244,13 @@ class App {
     } else {
       this._saveDebounced(doc);
     }
-    // 思维导图同步(若当前在思维导图视图且非编辑触发)
+    // 当前视图的非编辑组件同步模型(避免切回时丢失改动)
     if (this.view === 'mindmap' && this.mindmap && !this.mindmap.editingId) {
       this.mindmap.setDoc(doc);
+    }
+    if (this.view === 'outline' && this.outliner) {
+      // 大纲正在编辑时不重渲染(避免光标跳),仅更新 doc 引用
+      this.outliner.doc = doc;
     }
     this._updateMindmapStatus();
   }
@@ -418,36 +425,40 @@ class App {
     this.el.mmZoomOut.addEventListener('click', () => this.mindmap?.zoomBy(1 / 1.2));
     this.el.mmZoomFit.addEventListener('click', () => this.mindmap?.fit());
     this.el.mmZoomReset.addEventListener('click', () => this.mindmap?.resetZoom());
-    this.el.mmAddChild.addEventListener('click', () => {
+    this.el.mmAddChild.addEventListener('click', (e) => {
+      e.stopPropagation();
       this.mindmap?.container?.focus();
       if (this.mindmap?.selectedId) {
         const f = this.doc && findNode(this.doc.root, this.mindmap.selectedId);
         if (f) this.mindmap._addChild(f.node);
       }
     });
-    this.el.mmAddSibling.addEventListener('click', () => {
+    this.el.mmAddSibling.addEventListener('click', (e) => {
+      e.stopPropagation();
       this.mindmap?.container?.focus();
       if (this.mindmap?.selectedId) {
         const f = this.doc && findNode(this.doc.root, this.mindmap.selectedId);
         if (f?.parent) this.mindmap._addSibling(f.parent, f.index);
       }
     });
-    this.el.mmDelete.addEventListener('click', () => {
+    this.el.mmDelete.addEventListener('click', (e) => {
+      e.stopPropagation();
       this.mindmap?.container?.focus();
       if (this.mindmap?.selectedId) {
         const f = this.doc && findNode(this.doc.root, this.mindmap.selectedId);
         if (f?.parent) this.mindmap._delete(f.parent, f.index);
       }
     });
-    // 字号选择
+    // 字号选择(用 fixed 定位避免坐标系问题)
     this.el.mmFontSize.addEventListener('click', (e) => {
+      e.stopPropagation();
       if (this.el.fontSizePopover.hidden) {
         const rect = this.el.mmFontSize.getBoundingClientRect();
+        this.el.fontSizePopover.style.position = 'fixed';
         this.el.fontSizePopover.style.top = (rect.bottom + 6) + 'px';
-        this.el.fontSizePopover.style.right = '16px';
+        this.el.fontSizePopover.style.right = (window.innerWidth - rect.right) + 'px';
         this.el.fontSizePopover.style.left = 'auto';
         this.el.fontSizePopover.hidden = false;
-        // 标记当前字号
         const f = this.mindmap?.selectedId ? findNode(this.doc.root, this.mindmap.selectedId) : null;
         const cur = f?.node.fontSize || 'M';
         this.el.fontSizePopover.querySelectorAll('.font-size-item').forEach((b) => {
@@ -464,7 +475,7 @@ class App {
       this.el.fontSizePopover.hidden = true;
     });
     document.addEventListener('click', (e) => {
-      if (!this.el.fontSizePopover.hidden && !this.el.fontSizePopover.contains(e.target) && e.target !== this.el.mmFontSize) {
+      if (!this.el.fontSizePopover.hidden && !this.el.fontSizePopover.contains(e.target) && !this.el.mmFontSize.contains(e.target)) {
         this.el.fontSizePopover.hidden = true;
       }
     });
