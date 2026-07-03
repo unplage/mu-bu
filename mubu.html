@@ -145,12 +145,12 @@ input, textarea { font-family: inherit; }
 .share-divider { display: flex; align-items: center; gap: 10px; margin: 16px 0; color: var(--text-faint); font-size: 12px; }
 .share-divider::before, .share-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 
-.toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); background: #2b333b; color: #fff; padding: 10px 18px; border-radius: 24px; font-size: 13px; box-shadow: var(--shadow-lg); z-index: 400; opacity: 0; transition: opacity 0.2s, transform 0.2s; pointer-events: none; }
-.toast.show { opacity: 1; transform: translateX(-50%) translateY(-4px); }
+.toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(20px); background: #2b333b; color: #fff; padding: 10px 18px; border-radius: 24px; font-size: 13px; box-shadow: var(--shadow-lg); z-index: 400; opacity: 0; transition: opacity 0.25s, transform 0.25s; pointer-events: none; }
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
 .sidebar-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 20; opacity: 0; pointer-events: none; transition: 0.2s; }
 .only-mobile { display: none; }
-@media (max-width: 760px) {
+@media (max-width: 760px), (pointer: coarse) {
   .sidebar { position: absolute; left: 0; top: 0; bottom: 0; transform: translateX(-100%); box-shadow: var(--shadow-lg); }
   .sidebar.open { transform: translateX(0); }
   .sidebar.open ~ .sidebar-overlay { opacity: 1; pointer-events: auto; }
@@ -198,6 +198,8 @@ input, textarea { font-family: inherit; }
       <button id="exportBtn" class="icon-btn" title="导出">⬇</button>
       <button id="shareBtn" class="icon-btn" title="分享">↗</button>
       <button id="deleteDoc" class="icon-btn danger" title="删除文档">🗑</button>
+      <button id="outdentBtn" class="icon-btn only-mobile" title="取消缩进">←</button>
+      <button id="indentBtn" class="icon-btn only-mobile" title="缩进">→</button>
     </header>
 
     <section id="outlineView" class="view view-outline">
@@ -206,7 +208,7 @@ input, textarea { font-family: inherit; }
 
     <section id="mindmapView" class="view view-mindmap">
       <div id="mindmapCanvas" class="mindmap-canvas"></div>
-      <div class="mm-hint" id="mmHint">Tab 添加子节点 · Enter 添加兄弟 · 双击编辑 · Shift+点击折叠 · 拖拽平移 · 滚轮缩放</div>
+      <div class="mm-hint" id="mmHint"></div>
       <div class="mm-status" id="mmStatus">0 节点</div>
       <div class="mm-toolbar">
         <button id="mmAddChild" class="mm-btn" title="添加子节点 (Tab)">＋子节点</button>
@@ -225,7 +227,6 @@ input, textarea { font-family: inherit; }
   </main>
 </div>
 
-<!-- 浮层 -->
 <div id="colorPopover" class="popover" hidden>
   <div class="popover-title">节点配色</div>
   <div class="color-grid" id="colorGrid"></div>
@@ -278,7 +279,12 @@ input, textarea { font-family: inherit; }
 // ===================== utils =====================
 function uid(prefix = 'n') { return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 function deepClone(obj) { if (typeof structuredClone === 'function') return structuredClone(obj); return JSON.parse(JSON.stringify(obj)); }
-function debounce(fn, ms = 200) { let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); }; }
+function debounce(fn, ms = 200) {
+  let t;
+  const debounced = (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+  debounced.cancel = () => clearTimeout(t);
+  return debounced;
+}
 function el(tag, props = {}, children = []) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(props)) {
@@ -300,7 +306,6 @@ function download(filename, content, type = 'text/plain') {
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-// 文本测量 Canvas Context (优化性能，避免频繁创建)
 const _measureCanvas = document.createElement('canvas');
 const _measureCtx = _measureCanvas.getContext('2d');
 function getTextWidth(text, fontSize, fontWeight = 'normal') {
@@ -315,6 +320,16 @@ const COLORS = [
   { key: 'purple', name: '紫', hex: '#9b7bd8' }, { key: 'pink', name: '粉', hex: '#ec7cad' },
 ];
 function colorCss(key) { const c = COLORS.find((x) => x.key === key); return c ? c.hex : '#8a929c'; }
+function isLightColor(hex) {
+  if (!hex) return true;
+  const r = parseInt(hex.slice(1,3), 16), g = parseInt(hex.slice(3,5), 16), b = parseInt(hex.slice(5,7), 16);
+  return (r * 299 + g * 587 + b * 114) / 1000 > 128;
+}
+function shade(colorKey) {
+  if (!colorKey) return '#ffffff';
+  const map = { red: '#fbe7e6', orange: '#fdeede', yellow: '#fdf6dd', green: '#e6f5e6', cyan: '#e0f4f6', blue: '#e8f1fe', purple: '#efe9fb', pink: '#fbe9f1' };
+  return map[colorKey] || '#ffffff';
+}
 function formatDate(ts) {
   const d = new Date(ts); const now = new Date(); const diff = (now - d) / 1000;
   if (diff < 60) return '刚刚';
@@ -323,6 +338,8 @@ function formatDate(ts) {
   if (diff < 86400 * 7) return Math.floor(diff / 86400) + '天前';
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
+
+const isMobile = /Mobi|Android|iPhone/i.test(navigator.userAgent);
 
 // ===================== tree =====================
 function* walk(node, { includeCollapsed = false } = {}) {
@@ -388,9 +405,9 @@ async function db() { if (!_db) _db = await openDB(); return _db; }
 function tx(store, mode) { return db().then((d) => d.transaction(store, mode).objectStore(store)); }
 function createDoc(title = '未命名文档') {
   const now = Date.now();
-  return { id: uid('doc'), title, createdAt: now, updatedAt: now, root: { id: uid('n'), text: title, note: '', color: null, collapsed: false, children: [] } };
+  return { id: uid('doc'), title, createdAt: now, updatedAt: now, root: { id: uid('n'), text: title, note: '', color: null, collapsed: false, children: [], fontSize: 'M' } };
 }
-function createNode(text = '') { return { id: uid('n'), text, note: '', color: null, collapsed: false, children: [] }; }
+function createNode(text = '') { return { id: uid('n'), text, note: '', color: null, collapsed: false, children: [], fontSize: 'M' }; }
 async function listDocs() {
   const store = await tx(STORE, 'readonly');
   return new Promise((resolve, reject) => {
@@ -440,7 +457,7 @@ function importOPML(text) {
   if (xml.querySelector('parsererror')) throw new Error('OPML 解析失败');
   const rootOutline = xml.querySelector('opml > body > outline');
   if (!rootOutline) throw new Error('未找到 outline 节点');
-  const parseNode = (ol) => ({ id: 'n_' + Math.random().toString(36).slice(2, 9), text: (ol.getAttribute('text') || ol.getAttribute('title') || '').replace(/&#10;/g, '\n'), note: '', color: null, collapsed: false, children: Array.from(ol.querySelectorAll(':scope > outline')).map(parseNode) });
+  const parseNode = (ol) => ({ id: 'n_' + Math.random().toString(36).slice(2, 9), text: (ol.getAttribute('text') || ol.getAttribute('title') || '').replace(/&#10;/g, '\n'), note: '', color: null, collapsed: false, children: Array.from(ol.querySelectorAll(':scope > outline')).map(parseNode), fontSize: 'M' });
   const title = xml.querySelector('opml > head > title')?.textContent || '导入文档';
   return { id: 'doc_' + Date.now().toString(36), title, createdAt: Date.now(), updatedAt: Date.now(), root: parseNode(rootOutline) };
 }
@@ -470,7 +487,7 @@ async function exportPNG(svgEl, title) {
 }
 function exportSVG(svgEl, title) { download(`${safeName(title)}.svg`, serializeSVG(svgEl), 'image/svg+xml'); }
 
-const LINK_LIMIT = 8000; // 浏览器安全限制
+const LINK_LIMIT = 8000;
 async function encodeShare(doc) {
   const slim = { t: doc.title, r: trimNode(doc.root) };
   const json = JSON.stringify(slim);
@@ -484,11 +501,10 @@ async function decodeShare(hash) {
   const slim = JSON.parse(json);
   return { id: 'doc_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), title: slim.t || '分享文档', createdAt: Date.now(), updatedAt: Date.now(), root: restoreNode(slim.r) };
 }
-function restoreNode(s) { return { id: 'n_' + Math.random().toString(36).slice(2, 9), text: s.x || '', note: '', color: s.c || null, collapsed: !!s.k, children: s.h ? s.h.map(restoreNode) : [] }; }
+function restoreNode(s) { return { id: 'n_' + Math.random().toString(36).slice(2, 9), text: s.x || '', note: '', color: s.c || null, collapsed: !!s.k, children: s.h ? s.h.map(restoreNode) : [], fontSize: 'M' }; }
 async function buildShareLink(doc) { const hash = await encodeShare(doc); const base = location.origin + location.pathname; return { link: `${base}#share=${hash}`, length: hash.length, limit: LINK_LIMIT }; }
 function getShareHashFromURL() { const m = location.hash.match(/share=([^&]+)/); return m ? m[1] : null; }
 
-// Base64 & Gzip utils
 function base64urlEncode(bytes) {
   let bin = ''; const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   for (let i = 0; i < arr.length; i++) bin += String.fromCharCode(arr[i]);
@@ -503,14 +519,18 @@ function base64urlDecode(str) {
 }
 async function gzipCompress(str) {
   if (typeof CompressionStream === 'undefined') return new TextEncoder().encode(str);
-  const stream = new Blob([str]).stream().pipeThrough(new CompressionStream('gzip'));
-  const buf = await new Response(stream).arrayBuffer();
-  return new Uint8Array(buf);
+  try {
+    const stream = new Blob([str]).stream().pipeThrough(new CompressionStream('gzip'));
+    const buf = await new Response(stream).arrayBuffer();
+    return new Uint8Array(buf);
+  } catch (_) { return new TextEncoder().encode(str); }
 }
 async function gzipDecompress(bytes) {
   if (typeof DecompressionStream === 'undefined') return new TextDecoder().decode(bytes);
-  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
-  return await new Response(stream).text();
+  try {
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+    return await new Response(stream).text();
+  } catch (_) { return new TextDecoder().decode(bytes); }
 }
 
 // ===================== outliner =====================
@@ -570,7 +590,14 @@ class Outliner {
       if (!sel.rangeCount) return;
       const range = sel.getRangeAt(0);
       range.deleteContents();
-      range.insertNode(document.createTextNode(txt));
+      // 保留换行符
+      const lines = txt.split('\n');
+      const frag = document.createDocumentFragment();
+      lines.forEach((line, i) => {
+        if (i > 0) frag.appendChild(document.createElement('br'));
+        frag.appendChild(document.createTextNode(line));
+      });
+      range.insertNode(frag);
       range.collapse(false);
       sel.removeAllRanges();
       sel.addRange(range);
@@ -578,7 +605,16 @@ class Outliner {
     });
     return row;
   }
-  _saveFocus() { const sel = window.getSelection(); if (!sel.rangeCount) return; const textEl = sel.anchorNode?.parentElement?.closest('.node-text'); if (!textEl) return; this._focusId = textEl.dataset.id; this._focusOffset = caretOffset(textEl); }
+  _saveFocus() {
+    const sel = window.getSelection();
+    if (!sel.rangeCount || !sel.anchorNode) return;
+    const textEl = sel.anchorNode.nodeType === Node.TEXT_NODE 
+      ? sel.anchorNode.parentElement?.closest('.node-text')
+      : sel.anchorNode.closest?.('.node-text');
+    if (!textEl) return;
+    this._focusId = textEl.dataset.id;
+    this._focusOffset = caretOffset(textEl);
+  }
   _restoreFocus() { const id = this._focusId, offset = this._focusOffset; this._focusId = null; this._focusOffset = null; const textEl = this.container.querySelector(`.node-text[data-id="${id}"]`); if (!textEl) return; textEl.focus(); setCaret(textEl, offset); }
   _focusNode(id, offset = 'end') { this._focusId = id; this._focusOffset = offset; this.render(); }
   _onKey(e) {
@@ -588,7 +624,7 @@ class Outliner {
     
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault(); const split = splitAtCaret(textEl); node.text = split.before;
-      const newNode = makeNode(split.after);
+      const newNode = createNode(split.after);
       if (parent) insertAfter(parent, index, newNode); else node.children.unshift(newNode);
       this.selectedId = newNode.id; this._focusNode(newNode.id, 'start'); this._emitChange(true); return;
     }
@@ -603,7 +639,6 @@ class Outliner {
       if (!parent) return;
       let target;
       if (node.children && node.children.length > 0) {
-        // 提升子节点
         const gpInfo = findNode(this.doc.root, parent.id);
         const grandparent = gpInfo ? gpInfo.parent : null;
         if (grandparent) {
@@ -637,6 +672,22 @@ class Outliner {
   applyColor(colorKey) { const f = findNode(this.doc.root, this.selectedId); if (!f) return; f.node.color = colorKey || null; this._saveFocus(); this.render(); this._emitChange(true); }
   collapseAll() { for (const n of walkGen(this.doc.root)) { if (n === this.doc.root) continue; if (n.children && n.children.length) n.collapsed = true; } this.render(); this._emitChange(true); }
   expandAll() { for (const n of walkGen(this.doc.root)) n.collapsed = false; this.render(); this._emitChange(true); }
+  indentSelected() {
+    const f = findNode(this.doc.root, this.selectedId);
+    if (!f || !f.parent) return false;
+    const { parent, index } = f;
+    if (indent(parent, index)) { this._saveFocus(); this.render(); this._emitChange(true); return true; }
+    return false;
+  }
+  outdentSelected() {
+    const f = findNode(this.doc.root, this.selectedId);
+    if (!f || !f.parent) return false;
+    const { parent, index } = f;
+    const gpInfo = findNode(this.doc.root, parent.id);
+    const grandparent = gpInfo ? gpInfo.parent : null;
+    if (outdent(parent, index, grandparent)) { this._saveFocus(); this.render(); this._emitChange(true); return true; }
+    return false;
+  }
   _onDragStart(e) { const row = e.target.closest('.outline-row'); if (!row || row.draggable === false) return; this._dragId = row.dataset.id; e.dataTransfer.effectAllowed = 'move'; row.classList.add('dragging'); }
   _onDragOver(e) {
     const row = e.target.closest('.outline-row'); if (!row) return;
@@ -661,7 +712,6 @@ class Outliner {
   _emitChange(persist) { this.onChange(this.doc, persist); }
 }
 function* walkGen(node) { yield node; if (node.children) for (const c of node.children) yield* walkGen(c); }
-function makeNode(text = '') { return { id: 'n_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), text, note: '', color: null, collapsed: false, children: [] }; }
 function previousVisibleId(root, id) { const flat = flattenVisible(root); const i = flat.findIndex((x) => x.node.id === id); return i > 0 ? flat[i - 1].node.id : null; }
 function nextVisibleId(root, id) { const flat = flattenVisible(root); const i = flat.findIndex((x) => x.node.id === id); return i >= 0 && i < flat.length - 1 ? flat[i + 1].node.id : null; }
 function textToModel(textEl) { let out = ''; textEl.childNodes.forEach((n, i) => { if (n.nodeType === Node.TEXT_NODE) out += n.textContent; else if (n.nodeName === 'BR') out += '\n'; else if (n.nodeName === 'DIV') out += (i ? '\n' : '') + n.textContent; }); return out; }
@@ -690,20 +740,35 @@ class Mindmap {
   constructor(container, doc, onChange) {
     this.container = container; this.doc = doc; this.onChange = onChange;
     this.scale = 1; this.tx = 0; this.ty = 0;
-    this.selectedId = doc.root.id; this.editingId = null; this._editingDraft = ''; this._panning = null;
+    this.selectedId = doc.root.id; this.editingId = null; this._editingDraft = '';
+    this._panning = null;
+    this._wasDragging = false; 
+    this._longPressTimer = null;
+    this._longPressTriggered = false;
     this._attach();
   }
   setDoc(doc) { this.doc = doc; this.editingId = null; if (!findNode(doc.root, this.selectedId)) this.selectedId = doc.root.id; this.render(); this.fit(); }
   _attach() {
     const c = this.container;
     c.addEventListener('mousedown', (e) => {
-      if (e.target.closest('.mm-node') || e.target.closest('.mm-edit')) return;
-      if (e.button === 0) { this.selectedId = null; this.render(); }
-      this._panning = { x: e.clientX, y: e.clientY, tx: this.tx, ty: this.ty, moved: false };
+      this._wasDragging = false;
+      this._panning = { x: e.clientX, y: e.clientY, tx: this.tx, ty: this.ty };
       c.classList.add('panning');
     });
-    window.addEventListener('mousemove', (e) => { if (!this._panning) return; const dx = e.clientX - this._panning.x, dy = e.clientY - this._panning.y; if (Math.abs(dx) > 3 || Math.abs(dy) > 3) this._panning.moved = true; this.tx = this._panning.tx + dx; this.ty = this._panning.ty + dy; this._applyTransform(); });
-    window.addEventListener('mouseup', () => { this._panning = null; c.classList.remove('panning'); });
+    window.addEventListener('mousemove', (e) => {
+      if (!this._panning) return;
+      const dx = e.clientX - this._panning.x, dy = e.clientY - this._panning.y;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) this._wasDragging = true;
+      this.tx = this._panning.tx + dx;
+      this.ty = this._panning.ty + dy;
+      this._applyTransform();
+    });
+    window.addEventListener('mouseup', () => {
+      if (this._panning) {
+        this._panning = null;
+        c.classList.remove('panning');
+      }
+    });
     c.addEventListener('wheel', (e) => {
       e.preventDefault(); const delta = e.deltaY > 0 ? 0.9 : 1.1;
       const rect = c.getBoundingClientRect(); const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
@@ -711,25 +776,43 @@ class Mindmap {
       this.tx = cx - (cx - this.tx) * ratio; this.ty = cy - (cy - this.ty) * ratio; this.scale = newScale; this._applyTransform();
     }, { passive: false });
 
-    // Touch support for mobile
     let touchData = null;
     c.addEventListener('touchstart', (e) => {
-      if (e.target.closest('.mm-node') || e.target.closest('.mm-edit')) return;
+      if (e.target.closest('.mm-edit')) return;
+      const t = e.touches[0];
+      this._wasDragging = false;
+      this._longPressTriggered = false;
+      
       if (e.touches.length === 1) {
-        touchData = { mode: 'pan', x: e.touches[0].clientX, y: e.touches[0].clientY, tx: this.tx, ty: this.ty, moved: false };
+        touchData = { mode: 'pan', x: t.clientX, y: t.clientY, tx: this.tx, ty: this.ty };
       } else if (e.touches.length === 2) {
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
         touchData = { mode: 'pinch', dist: Math.hypot(dx, dy), scale: this.scale, cx: (e.touches[0].clientX + e.touches[1].clientX)/2, cy: (e.touches[0].clientY + e.touches[1].clientY)/2 };
+        this._wasDragging = true; 
+      }
+      if (e.target.closest('.mm-node') && !e.target.closest('.mm-edit')) {
+        const nodeEl = e.target.closest('.mm-node');
+        const id = nodeEl?.dataset.id;
+        if (id) {
+          this._longPressTimer = setTimeout(() => {
+            const f = findNode(this.doc.root, id);
+            if (f) {
+              this._longPressTriggered = true;
+              this._startEdit(f.node);
+            }
+          }, 500);
+        }
       }
     }, { passive: true });
     c.addEventListener('touchmove', (e) => {
       if (!touchData) return;
       e.preventDefault();
+      clearTimeout(this._longPressTimer);
       if (touchData.mode === 'pan' && e.touches.length === 1) {
         const dx = e.touches[0].clientX - touchData.x;
         const dy = e.touches[0].clientY - touchData.y;
-        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) touchData.moved = true;
+        if (Math.abs(dx) > 8 || Math.abs(dy) > 8) this._wasDragging = true;
         this.tx = touchData.tx + dx;
         this.ty = touchData.ty + dy;
         this._applyTransform();
@@ -748,7 +831,10 @@ class Mindmap {
         this._applyTransform();
       }
     }, { passive: false });
-    c.addEventListener('touchend', () => { touchData = null; });
+    c.addEventListener('touchend', () => {
+      clearTimeout(this._longPressTimer);
+      touchData = null;
+    });
 
     c.tabIndex = 0;
     c.addEventListener('keydown', (e) => this._onKey(e));
@@ -766,16 +852,44 @@ class Mindmap {
     if (e.key === 'ArrowRight' && node.children && node.children.length) { e.preventDefault(); this.selectedId = node.children[0].id; this.render(); return; }
     if (e.key === 'ArrowLeft' && parent) { e.preventDefault(); this.selectedId = parent.id; this.render(); return; }
   }
-  _addChild(parent) { const newNode = mmMakeNode('新节点', parent.fontSize || 'M'); if (!parent.children) parent.children = []; parent.children.push(newNode); parent.collapsed = false; this.selectedId = newNode.id; this.onChange(this.doc, true); this.render(); this._startEdit(newNode); }
-  _addSibling(parent, index) { const newNode = mmMakeNode('新节点', parent.fontSize || 'M'); parent.children.splice(index + 1, 0, newNode); this.selectedId = newNode.id; this.onChange(this.doc, true); this.render(); this._startEdit(newNode); }
-  _delete(parent, index) { const prev = parent.children[index - 1]; parent.children.splice(index, 1); this.selectedId = prev ? prev.id : parent.id; this.onChange(this.doc, true); this.render(); }
-  _startEdit(node) { this.editingId = node.id; this._editingDraft = node.text; this.render(); }
+  _addChild(parent) {
+    const inheritedSize = parent.fontSize || 'M';
+    const newNode = mmMakeNode('新节点', inheritedSize);
+    if (!parent.children) parent.children = [];
+    parent.children.push(newNode); parent.collapsed = false;
+    this.selectedId = newNode.id;
+    this.onChange(this.doc, true);
+    this.render();
+    this._startEdit(newNode);
+  }
+  _addSibling(parent, index) {
+    const inheritedSize = parent.fontSize || 'M';
+    const newNode = mmMakeNode('新节点', inheritedSize);
+    parent.children.splice(index + 1, 0, newNode);
+    this.selectedId = newNode.id;
+    this.onChange(this.doc, true);
+    this.render();
+    this._startEdit(newNode);
+  }
+  _delete(parent, index) {
+    const prev = parent.children[index - 1];
+    parent.children.splice(index, 1);
+    this.selectedId = prev ? prev.id : parent.id;
+    this.onChange(this.doc, true);
+    this.render();
+  }
+  _startEdit(node) {
+    if (this.editingId === node.id) return;
+    this.editingId = node.id;
+    this._editingDraft = node.text;
+    this.render();
+  }
   _applyTransform() { const g = this.container.querySelector('#mm-root'); if (g) g.setAttribute('transform', `translate(${this.tx},${this.ty}) scale(${this.scale})`); }
   zoomBy(factor) { const rect = this.container.getBoundingClientRect(); const cx = rect.width / 2, cy = rect.height / 2; const newScale = Math.min(3, Math.max(0.2, this.scale * factor)); const ratio = newScale / this.scale; this.tx = cx - (cx - this.tx) * ratio; this.ty = cy - (cy - this.ty) * ratio; this.scale = newScale; this._applyTransform(); }
   resetZoom() { this.scale = 1; this._applyTransform(); }
   fit() {
     const g = this.container.querySelector('#mm-root'); if (!g) return;
-    let bbox; try { bbox = g.getBBox(); } catch (e) { return; }
+    let bbox; try { bbox = g.getBBox(); } catch (_) { return; }
     const rect = this.container.getBoundingClientRect();
     if (bbox.width <= 0 || bbox.height <= 0 || rect.width <= 0 || rect.height <= 0) return;
     const pad = 60;
@@ -803,7 +917,8 @@ class Mindmap {
       const mx = x1 + (x2 - x1) / 2;
       path.setAttribute('d', `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`);
       path.setAttribute('class', 'mm-edge'); path.setAttribute('fill', 'none');
-      path.setAttribute('stroke', e.to.color ? colorCss(e.to.color) : '#c4c9d0');
+      const edgeColor = e.to.color ? colorCss(e.to.color) : '#c4c9d0';
+      path.setAttribute('stroke', edgeColor);
       path.setAttribute('stroke-width', '1.5');
       g.append(path);
     }
@@ -813,7 +928,10 @@ class Mindmap {
       grp.setAttribute('class', 'mm-node');
       grp.setAttribute('transform', `translate(${n.x},${n.y})`);
       grp.dataset.id = n.id;
-      const fontSize = FONT_SIZES[n.fontSize || 'M'], lineH = LINE_HEIGHTS[n.fontSize || 'M'];
+      const fontSize = FONT_SIZES[n.fontSize || 'M'] || FONT_SIZES.M;
+      const lineH = LINE_HEIGHTS[n.fontSize || 'M'] || LINE_HEIGHTS.M;
+      const rectColor = n.color ? colorCss(n.color) : null;
+      const isRoot = n.id === this.doc.root.id;
       
       if (this.editingId === n.id) {
         const fo = document.createElementNS(ns, 'foreignObject');
@@ -822,31 +940,60 @@ class Mindmap {
         fo.append(ta); grp.append(fo); g.append(grp);
         requestAnimationFrame(() => { ta.focus(); ta.select(); });
         ta.addEventListener('input', () => { this._editingDraft = ta.value; });
-        const commit = () => { const f = findNode(this.doc.root, n.id); if (f) { f.node.text = this._editingDraft || '空节点'; this.onChange(this.doc, true); } this.editingId = null; this.render(); this._applyTransform(); };
+        const commit = () => {
+          if (this.editingId !== n.id) return;
+          const f = findNode(this.doc.root, n.id);
+          if (f) { f.node.text = this._editingDraft || '空节点'; this.onChange(this.doc, true); }
+          this.editingId = null;
+          this.render();
+          this._applyTransform();
+        };
         ta.addEventListener('blur', commit);
-        ta.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); ta.blur(); } if (ev.key === 'Escape') { this.editingId = null; this.render(); this._applyTransform(); } ev.stopPropagation(); });
+        ta.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
+          if (ev.key === 'Escape') { ev.preventDefault(); this.editingId = null; this.render(); this._applyTransform(); }
+          ev.stopPropagation();
+        });
         continue;
       }
       
       const rect = document.createElementNS(ns, 'rect');
       rect.setAttribute('class', 'mm-node-rect');
       rect.setAttribute('width', n.w); rect.setAttribute('height', n.h); rect.setAttribute('rx', 6);
-      const isRoot = n.id === this.doc.root.id;
-      if (n.color) { rect.setAttribute('fill', shade(n.color)); rect.setAttribute('stroke', colorCss(n.color)); rect.setAttribute('stroke-width', '2'); }
-      else if (isRoot) { rect.setAttribute('fill', '#4f8cf0'); rect.setAttribute('stroke', '#3d7be0'); rect.setAttribute('stroke-width', '2'); }
-      else { rect.setAttribute('fill', '#ffffff'); rect.setAttribute('stroke', '#dadde2'); rect.setAttribute('stroke-width', '1.5'); }
-      if (n.id === this.selectedId) { rect.setAttribute('stroke', '#4f8cf0'); rect.setAttribute('stroke-width', '3'); }
+      if (n.color) {
+        rect.setAttribute('fill', shade(n.color));
+        rect.setAttribute('stroke', rectColor);
+        rect.setAttribute('stroke-width', '2');
+      } else if (isRoot) {
+        rect.setAttribute('fill', '#4f8cf0');
+        rect.setAttribute('stroke', '#3d7be0');
+        rect.setAttribute('stroke-width', '2');
+      } else {
+        rect.setAttribute('fill', '#ffffff');
+        rect.setAttribute('stroke', '#dadde2');
+        rect.setAttribute('stroke-width', '1.5');
+      }
+      if (n.id === this.selectedId) {
+        rect.setAttribute('stroke', '#4f8cf0');
+        rect.setAttribute('stroke-width', '3');
+      }
       grp.append(rect);
       
       const lines = n.lines;
       const textH = lines.length * lineH;
       const startY = (n.h - textH) / 2 + fontSize - 3;
+      let textColor = '#2b333b';
+      if (isRoot && !n.color) {
+        textColor = '#fff';
+      } else if (n.color) {
+        textColor = isLightColor(rectColor) ? '#2b333b' : '#ffffff';
+      }
       for (let i = 0; i < lines.length; i++) {
         const t = document.createElementNS(ns, 'text');
         t.setAttribute('x', NODE_PAD_X); t.setAttribute('y', startY + i * lineH);
         t.setAttribute('font-size', fontSize);
         t.setAttribute('font-family', '-apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif');
-        t.setAttribute('fill', (isRoot && !n.color) ? '#fff' : '#2b333b');
+        t.setAttribute('fill', textColor);
         t.setAttribute('class', 'mm-node-text');
         t.textContent = lines[i];
         grp.append(t);
@@ -871,36 +1018,50 @@ class Mindmap {
       
       grp.addEventListener('click', (e) => {
         e.stopPropagation();
-        if (this._panning?.moved) return;
+        const wasDrag = this._wasDragging;
+        const wasLongPress = this._longPressTriggered;
+        this._wasDragging = false;
+        this._longPressTriggered = false;
+        if (wasDrag || wasLongPress) return;
+        
         this.selectedId = n.id;
         if (e.shiftKey && n.children && n.children.length) { const f = findNode(this.doc.root, n.id); if (f) { f.node.collapsed = !f.node.collapsed; this.onChange(this.doc, true); } }
-        if (e.detail === 2) { this._startEdit(n); return; }
+        if (e.detail === 2 && !isMobile) { this._startEdit(n); return; }
         this.render();
       });
       g.append(grp);
     }
     svg.append(g); this.container.replaceChildren(svg); this._applyTransform();
   }
-  applyFontSize(size) { if (!this.selectedId) return; const f = findNode(this.doc.root, this.selectedId); if (!f) return; f.node.fontSize = size; this.onChange(this.doc, true); this.render(); }
+  applyFontSize(size) {
+    if (!this.selectedId) return;
+    const f = findNode(this.doc.root, this.selectedId);
+    if (!f) return;
+    const valid = ['S','M','L'];
+    f.node.fontSize = valid.includes(size) ? size : 'M';
+    this.onChange(this.doc, true);
+  }
   countNodes() { let n = 0; const rec = (node) => { n++; if (node.children) node.children.forEach(rec); }; rec(this.doc.root); return n; }
 }
-function mmMakeNode(text = '', fontSize = 'M') { return { id: 'n_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), text, note: '', color: null, collapsed: false, children: [], fontSize }; }
+function mmMakeNode(text = '', fontSize = 'M') {
+  const valid = ['S','M','L'];
+  return { id: 'n_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), text, note: '', color: null, collapsed: false, children: [], fontSize: valid.includes(fontSize) ? fontSize : 'M' };
+}
 
-// 精确文字测量与换行计算
 function measureNode(node) {
-  const fontSize = FONT_SIZES[node.fontSize || 'M'], lineH = LINE_HEIGHTS[node.fontSize || 'M'];
+  const sizeKey = (node.fontSize && ['S','M','L'].includes(node.fontSize)) ? node.fontSize : 'M';
+  const fontSize = FONT_SIZES[sizeKey];
+  const lineH = LINE_HEIGHTS[sizeKey];
   const maxW = NODE_MAX_W - NODE_PAD_X * 2;
   const lines = [];
   for (const paragraph of (node.text || '').split('\n')) {
     if (paragraph === '') { lines.push(''); continue; }
-    // 拆分中英文混合，按词断行
-    const words = paragraph.split(/(\s+)/); 
+    const words = paragraph.split(/(\s+)/);
     let current = '';
     for (const w of words) {
       let test = current + w;
       if (getTextWidth(test, fontSize) > maxW) {
         if (current) lines.push(current);
-        // 如果单个词太长(如长中文串)，强制逐字符拆分
         if (getTextWidth(w, fontSize) > maxW) {
           let charCurrent = '';
           for (let char of w) {
@@ -948,7 +1109,6 @@ function collect(node, parent, nodes, edges) {
   if (parent) edges.push({ from: parent, to: item });
   if (node.children && !node.collapsed) for (const c of node.children) collect(c, item, nodes, edges);
 }
-function shade(colorKey) { const map = { red: '#fbe7e6', orange: '#fdeede', yellow: '#fdf6dd', green: '#e6f5e6', cyan: '#e0f4f6', blue: '#e8f1fe', purple: '#efe9fb', pink: '#fbe9f1' }; return map[colorKey] || '#ffffff'; }
 
 // ===================== app =====================
 const $ = (s) => document.querySelector(s);
@@ -958,11 +1118,15 @@ class App {
     this.outliner = null; this.mindmap = null;
     this.history = []; this.redoStack = [];
     this._saveDebounced = debounce((d) => saveDoc(d), 400);
+    this._pushHistoryDebounced = debounce((d) => this._pushHistory(d, true), 800);
     this._init();
   }
   async _init() {
     this._cacheEls(); this._bindToolbar(); this._bindSidebar(); this._bindModals();
     this._bindColorPopover(); this._bindMindmapControls(); this._bindResize(); this._initColorGrid();
+    this.el.mmHint.textContent = isMobile
+      ? '双击编辑 · 双指缩放 · 拖拽平移 · 单击选中'
+      : 'Tab 添加子节点 · Enter 添加兄弟 · 双击编辑 · Shift+点击折叠 · 拖拽平移 · 滚轮缩放';
     await this.refreshDocs();
     const shareHash = getShareHashFromURL();
     if (shareHash) {
@@ -988,6 +1152,7 @@ class App {
       mmAddChild: $('#mmAddChild'), mmAddSibling: $('#mmAddSibling'), mmDelete: $('#mmDelete'),
       mmFontSize: $('#mmFontSize'), mmColor: $('#mmColor'), mmHint: $('#mmHint'), mmStatus: $('#mmStatus'),
       fontSizePopover: $('#fontSizePopover'),
+      indentBtn: $('#indentBtn'), outdentBtn: $('#outdentBtn'),
     };
   }
   _bindToolbar() {
@@ -996,12 +1161,14 @@ class App {
     this.el.docTitle.addEventListener('input', () => { if (!this.doc) return; this.doc.title = this.el.docTitle.value; this._saveDebounced(this.doc); this.refreshDocs(); });
     this.el.collapseAll.addEventListener('click', () => this.outliner?.collapseAll());
     this.el.expandAll.addEventListener('click', () => this.outliner?.expandAll());
-    this.el.colorBtn.addEventListener('click', (e) => this._toggleColorPopover(e));
+    this.el.colorBtn.addEventListener('click', (e) => this._toggleColorPopover(e, this.el.colorBtn));
     this.el.exportBtn.addEventListener('click', () => this.el.exportModal.hidden = false);
     this.el.shareBtn.addEventListener('click', () => this._share());
     this.el.deleteDoc.addEventListener('click', () => this._deleteDoc());
     this.el.undoBtn.addEventListener('click', () => this._undo());
     this.el.redoBtn.addEventListener('click', () => this._redo());
+    this.el.indentBtn.addEventListener('click', () => { if (this.outliner) this.outliner.indentSelected(); });
+    this.el.outdentBtn.addEventListener('click', () => { if (this.outliner) this.outliner.outdentSelected(); });
     
     document.addEventListener('keydown', (e) => {
       const mod = e.ctrlKey || e.metaKey;
@@ -1043,12 +1210,12 @@ class App {
     const doc = createDoc('未命名文档'); await saveDoc(doc); this.doc = doc; await this.refreshDocs(); this._afterDocLoad(); 
     this.el.docTitle.focus(); this.el.docTitle.select(); 
     this.el.searchDocs.value = ''; this._renderDocList();
-    if (window.innerWidth <= 760) this.el.sidebar.classList.remove('open');
+    if (window.innerWidth <= 760 || window.matchMedia('(pointer: coarse)').matches) this.el.sidebar.classList.remove('open');
   }
   async openDoc(id) { 
     const doc = await getDoc(id); if (!doc) return; this.doc = doc; this._afterDocLoad(); 
     this.el.searchDocs.value = ''; this._renderDocList();
-    if (window.innerWidth <= 760) this.el.sidebar.classList.remove('open');
+    if (window.innerWidth <= 760 || window.matchMedia('(pointer: coarse)').matches) this.el.sidebar.classList.remove('open');
   }
   async _deleteDoc() {
     if (!this.doc) return;
@@ -1069,33 +1236,40 @@ class App {
     } catch (e) { console.error(e); this.toast('导入失败: ' + e.message); }
     finally { this.el.importFile.value = ''; }
   }
-  _afterDocLoad() {
+  _afterDocLoad(noPushHistory = false) {
     this.el.docTitle.value = this.doc.title; this.el.colorBtn.disabled = false;
     if (!this.outliner) this.outliner = new Outliner(this.el.outlineTree, this.doc, (d, p) => this._onChange(d, p));
     else this.outliner.setDoc(this.doc);
     if (!this.mindmap) this.mindmap = new Mindmap(this.el.mindmapCanvas, this.doc, (d, p) => this._onChange(d, p));
     else this.mindmap.setDoc(this.doc);
-    this.history = [JSON.stringify(this.doc.root)];
-    this.redoStack = [];
+    if (!noPushHistory) {
+      this.history = [JSON.stringify(this.doc.root)];
+      this.redoStack = [];
+    }
     this._updateUndoRedo();
     this.switchView(this.view); this._renderDocList();
   }
   _onChange(doc, persist) {
     this.doc = doc;
     if (persist) {
-      this._pushHistory();
+      this._pushHistoryDebounced.cancel();
+      this._pushHistory(doc);
       saveDoc(doc).then(() => this.refreshDocs());
     } else {
       this._saveDebounced(doc);
+      this._pushHistoryDebounced(doc);
     }
     if (this.view === 'mindmap' && this.mindmap && !this.mindmap.editingId) this.mindmap.setDoc(doc);
     if (this.view === 'outline' && this.outliner) this.outliner.doc = doc;
     this._updateMindmapStatus();
   }
-  _pushHistory() {
-    this.history.push(JSON.stringify(this.doc.root));
+  _pushHistory(doc = this.doc, isDebounced = false) {
+    const last = this.history[this.history.length - 1];
+    const current = JSON.stringify(doc.root);
+    if (last === current) return;
+    this.history.push(current);
     if (this.history.length > 50) this.history.shift();
-    this.redoStack = [];
+    if (!isDebounced) this.redoStack = [];
     this._updateUndoRedo();
   }
   _undo() {
@@ -1136,15 +1310,16 @@ class App {
     node.color = colorKey || null;
     if (this.outliner) { this.outliner._saveFocus(); this.outliner.render(); }
     if (this.view === 'mindmap' && this.mindmap) { this.mindmap.render(); this.mindmap._applyTransform(); }
-    saveDoc(this.doc).then(() => this.refreshDocs());
+    this._onChange(this.doc, true);
   }
-  _toggleColorPopover(e) {
+  _toggleColorPopover(e, btn) {
     e.stopPropagation();
     if (this.el.colorPopover.hidden) {
-      const rect = this.el.colorBtn.getBoundingClientRect();
+      const rect = btn.getBoundingClientRect();
       this.el.colorPopover.style.position = 'fixed';
       this.el.colorPopover.style.top = (rect.bottom + 6) + 'px';
-      this.el.colorPopover.style.left = (rect.left - 90) + 'px';
+      this.el.colorPopover.style.left = Math.max(0, rect.left - 90) + 'px';
+      this.el.colorPopover.style.right = 'auto';
       this.el.colorPopover.hidden = false;
       const cur = this._selectedColor();
       this.el.colorGrid.querySelectorAll('.color-swatch').forEach((s) => s.classList.toggle('active', s.dataset.color === cur));
@@ -1181,7 +1356,7 @@ class App {
   }
   async _exportPNG() {
     const wasOutline = this.view === 'outline'; if (wasOutline) this.switchView('mindmap');
-    await new Promise((r) => requestAnimationFrame(r));
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     const svg = this.el.mindmapCanvas.querySelector('svg'); if (!svg) throw new Error('思维导图未就绪');
     await exportPNG(svg, this.doc.title);
   }
@@ -1243,16 +1418,7 @@ class App {
     });
     this.el.mmColor.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (this.el.colorPopover.hidden) {
-        const rect = this.el.mmColor.getBoundingClientRect();
-        this.el.colorPopover.style.position = 'fixed';
-        this.el.colorPopover.style.top = (rect.bottom + 6) + 'px';
-        this.el.colorPopover.style.right = (window.innerWidth - rect.right) + 'px';
-        this.el.colorPopover.style.left = 'auto';
-        this.el.colorPopover.hidden = false;
-        const cur = this._selectedColor();
-        this.el.colorGrid.querySelectorAll('.color-swatch').forEach((s) => s.classList.toggle('active', s.dataset.color === cur));
-      } else this._hideColorPopover();
+      this._toggleColorPopover(e, this.el.mmColor);
     });
     this.el.fontSizePopover.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1269,10 +1435,15 @@ class App {
     window.addEventListener('resize', debounce(() => { if (this.view === 'mindmap' && this.mindmap) { this.mindmap.render(); this.mindmap._applyTransform(); } }, 150));
   }
   toast(msg) {
-    this.el.toast.textContent = msg; this.el.toast.hidden = false;
-    requestAnimationFrame(() => this.el.toast.classList.add('show'));
+    this.el.toast.textContent = msg;
+    this.el.toast.hidden = false;
+    void this.el.toast.offsetWidth;
+    this.el.toast.classList.add('show');
     clearTimeout(this._toastT);
-    this._toastT = setTimeout(() => { this.el.toast.classList.remove('show'); setTimeout(() => { this.el.toast.hidden = true; }, 200); }, 2200);
+    this._toastT = setTimeout(() => {
+      this.el.toast.classList.remove('show');
+      setTimeout(() => { this.el.toast.hidden = true; }, 200);
+    }, 2200);
   }
 }
 new App();
