@@ -66,11 +66,27 @@
       <!-- 思维导图视图 -->
       <section id="mindmapView" class="view view-mindmap">
         <div id="mindmapCanvas" class="mindmap-canvas"></div>
+        <div class="mm-hint" id="mmHint">Tab 添加子节点 · Enter 添加兄弟 · 双击编辑 · Shift+点击折叠 · 拖拽平移 · 滚轮缩放</div>
+        <div class="mm-status" id="mmStatus">0 节点</div>
         <div class="mm-toolbar">
+          <button id="mmAddChild" class="mm-btn" title="添加子节点 (Tab)">＋子</button>
+          <button id="mmAddSibling" class="mm-btn" title="添加兄弟 (Enter)">＋兄</button>
+          <button id="mmDelete" class="mm-btn" title="删除 (Backspace)">🗑</button>
+          <div class="mm-divider"></div>
+          <button id="mmFontSize" class="mm-btn" title="字号">字号</button>
+          <div class="mm-divider"></div>
           <button id="mmZoomIn" class="mm-btn">＋</button>
           <button id="mmZoomOut" class="mm-btn">－</button>
           <button id="mmZoomFit" class="mm-btn">⤢</button>
           <button id="mmZoomReset" class="mm-btn">1:1</button>
+        </div>
+        <div id="fontSizePopover" class="popover" hidden>
+          <div class="popover-title">字号</div>
+          <div class="font-size-grid">
+            <button class="font-size-item" data-size="S">小 (12px)</button>
+            <button class="font-size-item" data-size="M">中 (14px)</button>
+            <button class="font-size-item" data-size="L">大 (18px)</button>
+          </div>
         </div>
       </section>
     </main>
