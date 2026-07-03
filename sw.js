@@ -1,5 +1,5 @@
 // Mubu-Lite service worker — 缓存优先,后台更新
-const VERSION = 'mubu-v6';
+const VERSION = 'mubu-v6.1';
 const ASSETS = [
   './',
   './index.html',
