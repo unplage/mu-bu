@@ -5,6 +5,7 @@ import * as DB from './db.js';
 import * as Export from './export.js';
 import * as Share from './share.js';
 import { el, COLORS, colorCss, formatDate, debounce, download } from './utils.js';
+import { findNode } from './tree.js';
 
 const $ = (s) => document.querySelector(s);
 
@@ -88,6 +89,13 @@ class App {
       mmZoomOut: $('#mmZoomOut'),
       mmZoomFit: $('#mmZoomFit'),
       mmZoomReset: $('#mmZoomReset'),
+      mmAddChild: $('#mmAddChild'),
+      mmAddSibling: $('#mmAddSibling'),
+      mmDelete: $('#mmDelete'),
+      mmFontSize: $('#mmFontSize'),
+      mmHint: $('#mmHint'),
+      mmStatus: $('#mmStatus'),
+      fontSizePopover: $('#fontSizePopover'),
     };
   }
 
@@ -117,6 +125,9 @@ class App {
     this.el.mindmapView.hidden = view !== 'mindmap';
     if (view === 'mindmap' && this.mindmap) {
       this.mindmap.setDoc(this.doc);
+      this._updateMindmapStatus();
+      // 让容器获焦以接收键盘事件
+      requestAnimationFrame(() => this.el.mindmapCanvas.focus());
     }
   }
 
@@ -234,6 +245,7 @@ class App {
     if (this.view === 'mindmap' && this.mindmap && !this.mindmap.editingId) {
       this.mindmap.setDoc(doc);
     }
+    this._updateMindmapStatus();
   }
 
   // ---------- 配色 ----------
@@ -266,8 +278,8 @@ class App {
   /** 统一配色:根据当前视图取选中节点 id,更新 model 并同步两个视图 */
   _applyColorToSelected(colorKey) {
     let id = null;
-    if (this.view === 'mindmap' && this.mindmap?.lastClickedId) {
-      id = this.mindmap.lastClickedId;
+    if (this.view === 'mindmap' && this.mindmap?.selectedId) {
+      id = this.mindmap.selectedId;
     } else if (this.outliner?.selectedId) {
       id = this.outliner.selectedId;
     }
@@ -305,8 +317,8 @@ class App {
   _hideColorPopover() { this.el.colorPopover.hidden = true; }
   _selectedColor() {
     let id = null;
-    if (this.view === 'mindmap' && this.mindmap?.lastClickedId) {
-      id = this.mindmap.lastClickedId;
+    if (this.view === 'mindmap' && this.mindmap?.selectedId) {
+      id = this.mindmap.selectedId;
     } else if (this.outliner?.selectedId) {
       id = this.outliner.selectedId;
     }
@@ -406,6 +418,63 @@ class App {
     this.el.mmZoomOut.addEventListener('click', () => this.mindmap?.zoomBy(1 / 1.2));
     this.el.mmZoomFit.addEventListener('click', () => this.mindmap?.fit());
     this.el.mmZoomReset.addEventListener('click', () => this.mindmap?.resetZoom());
+    this.el.mmAddChild.addEventListener('click', () => {
+      this.mindmap?.container?.focus();
+      if (this.mindmap?.selectedId) {
+        const f = this.doc && findNode(this.doc.root, this.mindmap.selectedId);
+        if (f) this.mindmap._addChild(f.node);
+      }
+    });
+    this.el.mmAddSibling.addEventListener('click', () => {
+      this.mindmap?.container?.focus();
+      if (this.mindmap?.selectedId) {
+        const f = this.doc && findNode(this.doc.root, this.mindmap.selectedId);
+        if (f?.parent) this.mindmap._addSibling(f.parent, f.index);
+      }
+    });
+    this.el.mmDelete.addEventListener('click', () => {
+      this.mindmap?.container?.focus();
+      if (this.mindmap?.selectedId) {
+        const f = this.doc && findNode(this.doc.root, this.mindmap.selectedId);
+        if (f?.parent) this.mindmap._delete(f.parent, f.index);
+      }
+    });
+    // 字号选择
+    this.el.mmFontSize.addEventListener('click', (e) => {
+      if (this.el.fontSizePopover.hidden) {
+        const rect = this.el.mmFontSize.getBoundingClientRect();
+        this.el.fontSizePopover.style.top = (rect.bottom + 6) + 'px';
+        this.el.fontSizePopover.style.right = '16px';
+        this.el.fontSizePopover.style.left = 'auto';
+        this.el.fontSizePopover.hidden = false;
+        // 标记当前字号
+        const f = this.mindmap?.selectedId ? findNode(this.doc.root, this.mindmap.selectedId) : null;
+        const cur = f?.node.fontSize || 'M';
+        this.el.fontSizePopover.querySelectorAll('.font-size-item').forEach((b) => {
+          b.classList.toggle('active', b.dataset.size === cur);
+        });
+      } else {
+        this.el.fontSizePopover.hidden = true;
+      }
+    });
+    this.el.fontSizePopover.addEventListener('click', (e) => {
+      const item = e.target.closest('.font-size-item');
+      if (!item) return;
+      this.mindmap?.applyFontSize(item.dataset.size);
+      this.el.fontSizePopover.hidden = true;
+    });
+    document.addEventListener('click', (e) => {
+      if (!this.el.fontSizePopover.hidden && !this.el.fontSizePopover.contains(e.target) && e.target !== this.el.mmFontSize) {
+        this.el.fontSizePopover.hidden = true;
+      }
+    });
+  }
+
+  _updateMindmapStatus() {
+    if (this.el.mmStatus && this.mindmap) {
+      const n = this.mindmap.countNodes();
+      this.el.mmStatus.textContent = `${n} 节点`;
+    }
   }
 
   _bindResize() {
