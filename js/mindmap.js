@@ -85,21 +85,36 @@ export class Mindmap {
   }
   resetZoom() { this.scale = 1; this._applyTransform(); }
   fit() {
-    this.render();
     const g = this.container.querySelector('#mm-root');
     if (!g) return;
+    let bbox;
     try {
-      const bbox = g.getBBox();
-      const rect = this.container.getBoundingClientRect();
-      if (bbox.width === 0 || rect.width === 0) return;
-      const pad = 60;
-      const sx = (rect.width - pad * 2) / bbox.width;
-      const sy = (rect.height - pad * 2) / bbox.height;
-      this.scale = Math.min(1.2, Math.min(sx, sy));
-      this.tx = pad - bbox.x * this.scale;
-      this.ty = pad - bbox.y * this.scale + (rect.height - bbox.height * this.scale) / 2;
+      bbox = g.getBBox();
+    } catch (e) {
+      // getBBox 在未挂载时报错,退回默认变换
+      this.scale = 1;
+      this.tx = 60;
+      this.ty = 60;
       this._applyTransform();
-    } catch (e) { /* getBBox 在未挂载时报错,忽略 */ }
+      return;
+    }
+    const rect = this.container.getBoundingClientRect();
+    if (bbox.width <= 0 || bbox.height <= 0 || rect.width <= 0 || rect.height <= 0) {
+      // 容器尚未有尺寸,退回默认
+      this.scale = 1;
+      this.tx = 60;
+      this.ty = 60;
+      this._applyTransform();
+      return;
+    }
+    const pad = 60;
+    const sx = (rect.width - pad * 2) / bbox.width;
+    const sy = (rect.height - pad * 2) / bbox.height;
+    this.scale = Math.min(1.2, Math.min(sx, sy));
+    if (this.scale <= 0) this.scale = 0.5;
+    this.tx = pad - bbox.x * this.scale;
+    this.ty = pad - bbox.y * this.scale + (rect.height - bbox.height * this.scale) / 2;
+    this._applyTransform();
   }
 
   // ---------- 渲染 ----------
@@ -281,13 +296,15 @@ export class Mindmap {
 // ---------- 布局算法 ----------
 function measureNode(node) {
   const text = node.text || '';
-  // 估算宽度:最长行 * charW,限制范围
   const lines = text.split('\n');
   const maxLine = Math.max(...lines.map((l) => l.length), 1);
   let w = maxLine * CHAR_W + 20;
-  // 多行时高度增大,这里仍用固定 NODE_H(多行由 wrap 处理,但不增加盒子高度以保证布局整洁)
   w = Math.max(NODE_MIN_W, Math.min(NODE_MAX_W, w));
   node._w = w;
+  // 递归测量子节点
+  if (node.children) {
+    for (const c of node.children) measureNode(c);
+  }
   return w;
 }
 
@@ -319,16 +336,17 @@ function assignPos(node, depth, yTop) {
 }
 
 function collect(node, parent, nodes, edges) {
-  nodes.push({
+  const item = {
     id: node.id, text: node.text, color: node.color,
     x: node.x, y: node.y, w: node._w,
     children: node.children, collapsed: node.collapsed,
-  });
+  };
+  nodes.push(item);
   if (parent) {
-    edges.push({ from: parent, to: node });
+    edges.push({ from: parent, to: item });
   }
   if (node.children && !node.collapsed) {
-    for (const c of node.children) collect(c, node, nodes, edges);
+    for (const c of node.children) collect(c, item, nodes, edges);
   }
 }
 
