@@ -202,25 +202,49 @@ input, textarea { font-family: inherit; }
 /* mindmap */
 .view-mindmap { background: #fafbfc; background-image:
   radial-gradient(circle, #e6e8eb 1px, transparent 1px); background-size: 24px 24px; }
-.mindmap-canvas { position: absolute; inset: 0; cursor: grab; overflow: hidden; }
+.mindmap-canvas { position: absolute; inset: 0; cursor: grab; overflow: hidden; outline: none; }
 .mindmap-canvas.panning { cursor: grabbing; }
 .mindmap-canvas svg { position: absolute; top: 0; left: 0; }
 .mm-toolbar {
   position: absolute; bottom: 16px; right: 16px;
-  display: flex; flex-direction: column; gap: 4px;
-  background: var(--bg-elev); padding: 4px; border-radius: var(--radius);
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--bg-elev); padding: 6px; border-radius: var(--radius);
   box-shadow: var(--shadow); border: 1px solid var(--border);
+  z-index: 10;
 }
 .mm-btn {
-  width: 32px; height: 32px; border: none; background: transparent; border-radius: 4px;
-  color: var(--text-soft); font-size: 14px; display: flex; align-items: center; justify-content: center;
+  height: 30px; padding: 0 8px; border: none; background: transparent; border-radius: 4px;
+  color: var(--text-soft); font-size: 12px; display: flex; align-items: center; justify-content: center;
+  min-width: 32px;
 }
 .mm-btn:hover { background: var(--bg); color: var(--text); }
+.mm-divider { height: 1px; background: var(--border); margin: 2px 4px; }
+.mm-hint {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+  background: rgba(43, 51, 59, 0.85); color: #fff; padding: 6px 14px; border-radius: 16px;
+  font-size: 11px; z-index: 10; pointer-events: none; backdrop-filter: blur(4px);
+}
+.mm-status {
+  position: absolute; bottom: 16px; left: 16px;
+  background: var(--bg-elev); padding: 6px 12px; border-radius: var(--radius);
+  box-shadow: var(--shadow); border: 1px solid var(--border);
+  font-size: 12px; color: var(--text-soft); z-index: 10;
+}
+.font-size-grid { display: flex; flex-direction: column; gap: 4px; }
+.font-size-item {
+  padding: 8px 12px; border: 1px solid var(--border); background: var(--bg-elev);
+  border-radius: var(--radius-sm); font-size: 13px; text-align: left; color: var(--text);
+}
+.font-size-item:hover { border-color: var(--primary); background: var(--primary-soft); }
 
 /* mm node styling via CSS classes applied to SVG */
-.mm-node-rect { transition: fill 0.15s; }
+.mm-node-rect { transition: fill 0.15s, stroke 0.15s; }
 .mm-node-text { fill: var(--text); pointer-events: none; user-select: none; }
 .mm-edge { fill: none; stroke: #c4c9d0; stroke-width: 1.5; }
+.mm-edit {
+  border: 2px solid #4f8cf0; border-radius: 4px; padding: 2px 6px; outline: none;
+  font-family: inherit; background: #fff;
+}
 
 /* popover */
 .popover {
