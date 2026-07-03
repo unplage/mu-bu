@@ -1,21 +1,21 @@
-// mindmap.js — 思维导图视图(SVG 无限画布,完整编辑)
-import { el, escapeHtml, colorCss } from './utils.js';
-import { findNode, flattenVisible } from './tree.js';
+// mindmap.js — 思维导图视图(SVG 无限画布,完整编辑,自适应节点)
+import { el, colorCss } from './utils.js';
+import { findNode } from './tree.js';
 
 const FONT_SIZES = { S: 12, M: 14, L: 18 };
-const NODE_H = 36;
-const NODE_GAP_Y = 12;
-const NODE_GAP_X = 80;
-const NODE_MAX_W = 260;
-const NODE_MIN_W = 60;
-const CHAR_W = 9;
-const LINE_H = 18;
+const LINE_HEIGHTS = { S: 16, M: 20, L: 26 };
+const NODE_PAD_X = 12;
+const NODE_PAD_Y = 8;
+const NODE_GAP_Y = 10;
+const NODE_GAP_X = 50;   // 层级间连线长度(紧凑)
+const NODE_MIN_W = 50;
+const NODE_MAX_W = 240;  // 超出换行
 
 export class Mindmap {
   constructor(container, doc, onChange) {
     this.container = container;
     this.doc = doc;
-    this.onChange = onChange; // (doc, persist) => void
+    this.onChange = onChange;
     this.scale = 1;
     this.tx = 0;
     this.ty = 0;
@@ -36,10 +36,8 @@ export class Mindmap {
 
   _attach() {
     const c = this.container;
-    // 平移(背景拖拽)
     c.addEventListener('mousedown', (e) => {
       if (e.target.closest('.mm-node') || e.target.closest('.mm-edit')) return;
-      // 点击空白:取消选中
       if (e.button === 0) {
         this.selectedId = null;
         this.render();
@@ -60,7 +58,6 @@ export class Mindmap {
       this._panning = null;
       c.classList.remove('panning');
     });
-    // 缩放(滚轮,以鼠标为中心)
     c.addEventListener('wheel', (e) => {
       e.preventDefault();
       const delta = e.deltaY > 0 ? 0.9 : 1.1;
@@ -75,71 +72,29 @@ export class Mindmap {
       this._applyTransform();
     }, { passive: false });
 
-    // 键盘(容器获焦后)
     c.tabIndex = 0;
     c.addEventListener('keydown', (e) => this._onKey(e));
   }
 
   _onKey(e) {
-    if (this.editingId) return; // 编辑中不处理快捷键
+    if (this.editingId) return;
     if (!this.selectedId) return;
     const found = findNode(this.doc.root, this.selectedId);
     if (!found) return;
     const { node, parent, index } = found;
 
-    if (e.key === 'Tab' && !e.shiftKey) {
-      e.preventDefault();
-      this._addChild(node);
-      return;
-    }
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      if (parent) this._addSibling(parent, index);
-      else this._addChild(node);
-      return;
-    }
-    if (e.key === 'Backspace') {
-      e.preventDefault();
-      if (parent) this._delete(parent, index);
-      return;
-    }
-    if (e.key === 'F2' || (e.key === ' ' && !e.target.closest('.mm-edit'))) {
-      e.preventDefault();
-      this._startEdit(node);
-      return;
-    }
-    if (e.key === 'ArrowUp' && parent && index > 0) {
-      e.preventDefault();
-      this.selectedId = parent.children[index - 1].id;
-      this.render();
-      return;
-    }
-    if (e.key === 'ArrowDown' && parent && index < parent.children.length - 1) {
-      e.preventDefault();
-      this.selectedId = parent.children[index + 1].id;
-      this.render();
-      return;
-    }
-    if (e.key === 'ArrowRight' && node.children && node.children.length) {
-      e.preventDefault();
-      this.selectedId = node.children[0].id;
-      this.render();
-      return;
-    }
-    if (e.key === 'ArrowLeft' && parent) {
-      e.preventDefault();
-      this.selectedId = parent.id;
-      this.render();
-      return;
-    }
+    if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); this._addChild(node); return; }
+    if (e.key === 'Enter') { e.preventDefault(); if (parent) this._addSibling(parent, index); else this._addChild(node); return; }
+    if (e.key === 'Backspace') { e.preventDefault(); if (parent) this._delete(parent, index); return; }
+    if (e.key === 'F2' || e.key === ' ') { e.preventDefault(); this._startEdit(node); return; }
+    if (e.key === 'ArrowUp' && parent && index > 0) { e.preventDefault(); this.selectedId = parent.children[index - 1].id; this.render(); return; }
+    if (e.key === 'ArrowDown' && parent && index < parent.children.length - 1) { e.preventDefault(); this.selectedId = parent.children[index + 1].id; this.render(); return; }
+    if (e.key === 'ArrowRight' && node.children && node.children.length) { e.preventDefault(); this.selectedId = node.children[0].id; this.render(); return; }
+    if (e.key === 'ArrowLeft' && parent) { e.preventDefault(); this.selectedId = parent.id; this.render(); return; }
   }
 
   _addChild(parent) {
-    const newNode = {
-      id: 'n_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
-      text: '新节点', note: '', color: null, collapsed: false, children: [],
-      fontSize: parent.fontSize || 'M',
-    };
+    const newNode = makeNode('新节点', parent.fontSize || 'M');
     if (!parent.children) parent.children = [];
     parent.children.push(newNode);
     parent.collapsed = false;
@@ -150,11 +105,7 @@ export class Mindmap {
   }
 
   _addSibling(parent, index) {
-    const newNode = {
-      id: 'n_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
-      text: '新节点', note: '', color: null, collapsed: false, children: [],
-      fontSize: parent.fontSize || 'M',
-    };
+    const newNode = makeNode('新节点', parent.fontSize || 'M');
     parent.children.splice(index + 1, 0, newNode);
     this.selectedId = newNode.id;
     this.onChange(this.doc, true);
@@ -176,7 +127,6 @@ export class Mindmap {
     this.render();
   }
 
-  // ---------- 缩放/平移 ----------
   _applyTransform() {
     const g = this.container.querySelector('#mm-root');
     if (g) g.setAttribute('transform', `translate(${this.tx},${this.ty}) scale(${this.scale})`);
@@ -184,8 +134,7 @@ export class Mindmap {
 
   zoomBy(factor) {
     const rect = this.container.getBoundingClientRect();
-    const cx = rect.width / 2;
-    const cy = rect.height / 2;
+    const cx = rect.width / 2, cy = rect.height / 2;
     const newScale = Math.min(3, Math.max(0.2, this.scale * factor));
     const ratio = newScale / this.scale;
     this.tx = cx - (cx - this.tx) * ratio;
@@ -202,7 +151,7 @@ export class Mindmap {
     try { bbox = g.getBBox(); } catch (e) { return; }
     const rect = this.container.getBoundingClientRect();
     if (bbox.width <= 0 || bbox.height <= 0 || rect.width <= 0 || rect.height <= 0) return;
-    const pad = 80;
+    const pad = 60;
     const sx = (rect.width - pad * 2) / bbox.width;
     const sy = (rect.height - pad * 2) / bbox.height;
     this.scale = Math.min(1.5, Math.min(sx, sy));
@@ -215,18 +164,15 @@ export class Mindmap {
   // ---------- 渲染 ----------
   render() {
     const root = this.doc.root;
+    // 1. 测量每个节点(宽高,基于字号与文本)
     measureNode(root);
+    // 2. 计算子树高度
     layoutHeight(root);
+    // 3. 分配坐标(x 基于实际累积宽度,非固定层级宽)
     assignPos(root, 0, 0);
 
-    const nodes = [];
-    const edges = [];
+    const nodes = [], edges = [];
     collect(root, null, nodes, edges);
-
-    // SVG 尺寸 = 容器尺寸(无限画布效果由 viewBox 配合 transform 实现)
-    const rect = this.container.getBoundingClientRect();
-    const cw = rect.width || 800;
-    const ch = rect.height || 600;
 
     const ns = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(ns, 'svg');
@@ -239,14 +185,14 @@ export class Mindmap {
     const g = document.createElementNS(ns, 'g');
     g.setAttribute('id', 'mm-root');
 
-    // 连线
+    // 连线(贝塞尔曲线,长度由实际节点宽度决定)
     for (const e of edges) {
       const path = document.createElementNS(ns, 'path');
       const x1 = e.from.x + e.from.w;
-      const y1 = e.from.y + NODE_H / 2;
+      const y1 = e.from.y + e.from.h / 2;
       const x2 = e.to.x;
-      const y2 = e.to.y + NODE_H / 2;
-      const mx = (x1 + x2) / 2;
+      const y2 = e.to.y + e.to.h / 2;
+      const mx = x1 + (x2 - x1) / 2;
       path.setAttribute('d', `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`);
       path.setAttribute('class', 'mm-edge');
       path.setAttribute('fill', 'none');
@@ -258,34 +204,32 @@ export class Mindmap {
     // 节点
     for (const n of nodes) {
       const grp = document.createElementNS(ns, 'g');
-      grp.setAttribute('class', 'mm-node' + (n.id === this.selectedId ? ' selected' : ''));
+      grp.setAttribute('class', 'mm-node');
       grp.setAttribute('transform', `translate(${n.x},${n.y})`);
       grp.dataset.id = n.id;
-
       const fontSize = FONT_SIZES[n.fontSize || 'M'];
+      const lineH = LINE_HEIGHTS[n.fontSize || 'M'];
 
-      // 编辑态:foreignObject + textarea
+      // 编辑态
       if (this.editingId === n.id) {
         const fo = document.createElementNS(ns, 'foreignObject');
-        fo.setAttribute('width', Math.max(n.w, 140));
-        fo.setAttribute('height', NODE_H);
+        fo.setAttribute('width', n.w);
+        fo.setAttribute('height', n.h);
         const ta = el('input', {
           class: 'mm-edit',
           type: 'text',
           value: this._editingDraft,
           style: {
-            width: Math.max(n.w - 16, 120) + 'px',
-            height: (NODE_H - 4) + 'px',
+            width: (n.w - 4) + 'px',
+            height: (n.h - 4) + 'px',
             fontSize: fontSize + 'px',
+            lineHeight: lineH + 'px',
           },
         });
         fo.append(ta);
         grp.append(fo);
         g.append(grp);
-        requestAnimationFrame(() => {
-          ta.focus();
-          ta.select();
-        });
+        requestAnimationFrame(() => { ta.focus(); ta.select(); });
         ta.addEventListener('input', () => { this._editingDraft = ta.value; });
         const commit = () => {
           const f = findNode(this.doc.root, n.id);
@@ -295,23 +239,23 @@ export class Mindmap {
           this._applyTransform();
         };
         ta.addEventListener('blur', commit);
-        ta.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter') { e.preventDefault(); ta.blur(); }
-          if (e.key === 'Escape') { this.editingId = null; this.render(); this._applyTransform(); }
-          e.stopPropagation();
+        ta.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter') { ev.preventDefault(); ta.blur(); }
+          if (ev.key === 'Escape') { this.editingId = null; this.render(); this._applyTransform(); }
+          ev.stopPropagation();
         });
         continue;
       }
 
-      // 矩形
+      // 矩形(高度自适应)
       const rect = document.createElementNS(ns, 'rect');
       rect.setAttribute('class', 'mm-node-rect');
       rect.setAttribute('width', n.w);
-      rect.setAttribute('height', NODE_H);
+      rect.setAttribute('height', n.h);
       rect.setAttribute('rx', 6);
       const isRoot = n.id === this.doc.root.id;
       if (n.color) {
-        rect.setAttribute('fill', shade(n.color, 0.15));
+        rect.setAttribute('fill', shade(n.color));
         rect.setAttribute('stroke', colorCss(n.color));
         rect.setAttribute('stroke-width', '2');
       } else if (isRoot) {
@@ -323,26 +267,24 @@ export class Mindmap {
         rect.setAttribute('stroke', '#dadde2');
         rect.setAttribute('stroke-width', '1.5');
       }
-      // 选中边框
       if (n.id === this.selectedId) {
         rect.setAttribute('stroke', '#4f8cf0');
         rect.setAttribute('stroke-width', '3');
       }
       grp.append(rect);
 
-      // 文本(自动换行)
-      const lines = wrapText(n.text, n.w - 16);
-      const textH = lines.length * LINE_H;
-      const startY = (NODE_H - textH) / 2 + fontSize - 2;
+      // 文本(支持多行,垂直居中)
+      const lines = n.lines;
+      const textH = lines.length * lineH;
+      const startY = (n.h - textH) / 2 + fontSize - 3;
       for (let i = 0; i < lines.length; i++) {
         const t = document.createElementNS(ns, 'text');
-        t.setAttribute('class', 'mm-node-text');
-        t.setAttribute('x', 8);
-        t.setAttribute('y', startY + i * LINE_H);
+        t.setAttribute('x', NODE_PAD_X);
+        t.setAttribute('y', startY + i * lineH);
         t.setAttribute('font-size', fontSize);
         t.setAttribute('font-family', '-apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif');
-        if (isRoot && !n.color) t.setAttribute('fill', '#fff');
-        else t.setAttribute('fill', '#2b333b');
+        t.setAttribute('fill', (isRoot && !n.color) ? '#fff' : '#2b333b');
+        t.setAttribute('class', 'mm-node-text');
         t.textContent = lines[i];
         grp.append(t);
       }
@@ -350,17 +292,16 @@ export class Mindmap {
       // 折叠标记
       if (n.children && n.children.length > 0 && n.collapsed) {
         const badge = document.createElementNS(ns, 'circle');
-        badge.setAttribute('cx', n.w);
-        badge.setAttribute('cy', NODE_H / 2);
+        badge.setAttribute('cx', n.w + 4);
+        badge.setAttribute('cy', n.h / 2);
         badge.setAttribute('r', 8);
         badge.setAttribute('fill', '#4f8cf0');
         badge.setAttribute('stroke', '#fff');
         badge.setAttribute('stroke-width', 2);
-        badge.setAttribute('class', 'mm-badge');
         grp.append(badge);
         const bn = document.createElementNS(ns, 'text');
-        bn.setAttribute('x', n.w);
-        bn.setAttribute('y', NODE_H / 2 + 4);
+        bn.setAttribute('x', n.w + 4);
+        bn.setAttribute('y', n.h / 2 + 4);
         bn.setAttribute('font-size', 11);
         bn.setAttribute('fill', '#fff');
         bn.setAttribute('text-anchor', 'middle');
@@ -369,33 +310,27 @@ export class Mindmap {
         grp.append(bn);
       }
 
-      // 节点统计(子节点数)
+      // 子节点数标记
       if (n.children && n.children.length > 0 && !n.collapsed) {
-        const count = n.children.length;
         const ct = document.createElementNS(ns, 'text');
         ct.setAttribute('x', n.w + 6);
-        ct.setAttribute('y', NODE_H / 2 + 4);
+        ct.setAttribute('y', n.h / 2 + 4);
         ct.setAttribute('font-size', 10);
         ct.setAttribute('fill', '#9aa1ab');
-        ct.textContent = `(${count})`;
+        ct.textContent = `(${n.children.length})`;
         grp.append(ct);
       }
 
       // 交互
       grp.addEventListener('click', (e) => {
         e.stopPropagation();
-        if (this._panning?.moved) return; // 拖拽中不触发
+        if (this._panning?.moved) return;
         this.selectedId = n.id;
-        // Shift+点击折叠/展开
         if (e.shiftKey && n.children && n.children.length) {
           const f = findNode(this.doc.root, n.id);
           if (f) { f.node.collapsed = !f.node.collapsed; this.onChange(this.doc, true); }
         }
-        // 双击编辑
-        if (e.detail === 2) {
-          this._startEdit(n);
-          return;
-        }
+        if (e.detail === 2) { this._startEdit(n); return; }
         this.render();
       });
 
@@ -407,7 +342,6 @@ export class Mindmap {
     this._applyTransform();
   }
 
-  /** 对选中节点应用字号 */
   applyFontSize(size) {
     if (!this.selectedId) return;
     const f = findNode(this.doc.root, this.selectedId);
@@ -417,7 +351,6 @@ export class Mindmap {
     this.render();
   }
 
-  /** 节点计数 */
   countNodes() {
     let n = 0;
     const rec = (node) => { n++; if (node.children) node.children.forEach(rec); };
@@ -426,39 +359,73 @@ export class Mindmap {
   }
 }
 
+// ---------- 工厂 ----------
+function makeNode(text = '', fontSize = 'M') {
+  return {
+    id: 'n_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+    text, note: '', color: null, collapsed: false, children: [],
+    fontSize,
+  };
+}
+
 // ---------- 布局算法 ----------
+/** 测量节点:计算宽高与换行(基于字号) */
 function measureNode(node) {
-  const text = node.text || '';
-  const lines = text.split('\n');
-  const maxLine = Math.max(...lines.map((l) => l.length), 1);
   const fontSize = FONT_SIZES[node.fontSize || 'M'];
-  const charW = fontSize * 0.6;
-  let w = maxLine * charW + 24;
-  w = Math.max(NODE_MIN_W, Math.min(NODE_MAX_W, w));
+  const lineH = LINE_HEIGHTS[node.fontSize || 'M'];
+  const charW = fontSize * 0.6;  // 中英文混合估算
+  const maxCharsPerLine = Math.floor((NODE_MAX_W - NODE_PAD_X * 2) / charW);
+
+  // 换行:显式 \n + 超长自动换行
+  const lines = [];
+  for (const seg of (node.text || '').split('\n')) {
+    if (seg.length <= maxCharsPerLine) { lines.push(seg); continue; }
+    let s = seg;
+    while (s.length > maxCharsPerLine) {
+      lines.push(s.slice(0, maxCharsPerLine));
+      s = s.slice(maxCharsPerLine);
+    }
+    if (s) lines.push(s);
+  }
+  if (!lines.length) lines.push('');
+
+  // 宽度:最长行的像素宽 + padding,限制范围
+  const maxLineW = Math.max(...lines.map((l) => l.length * charW), charW * 2);
+  const w = Math.max(NODE_MIN_W, Math.min(NODE_MAX_W, maxLineW + NODE_PAD_X * 2));
+  // 高度:行数 * 行高 + 上下 padding
+  const h = lines.length * lineH + NODE_PAD_Y * 2;
+
   node._w = w;
+  node._h = h;
+  node._lines = lines;
   if (node.children) for (const c of node.children) measureNode(c);
-  return w;
 }
 
 function layoutHeight(node) {
   if (!node.children || node.collapsed || node.children.length === 0) {
-    node._sh = NODE_H + NODE_GAP_Y;
+    node._sh = node._h + NODE_GAP_Y;
     return node._sh;
   }
   let total = 0;
   for (const c of node.children) total += layoutHeight(c);
-  node._sh = Math.max(NODE_H + NODE_GAP_Y, total);
+  node._sh = Math.max(node._h + NODE_GAP_Y, total);
   return node._sh;
 }
 
+/** 分配坐标:x 基于实际节点宽度 + 紧凑间隙(非固定层级宽) */
 function assignPos(node, depth, yTop) {
-  node.x = depth * (NODE_MAX_W + NODE_GAP_X);
+  if (depth === 0) {
+    node.x = 0;
+  } else {
+    // x 由父节点 x + 父节点 w + gap 决定(在调用处设置)
+  }
   if (!node.children || node.collapsed || node.children.length === 0) {
-    node.y = yTop + (NODE_H + NODE_GAP_Y - NODE_H) / 2;
+    node.y = yTop + (node._sh - node._h) / 2;
     return;
   }
   let cur = yTop;
   for (const c of node.children) {
+    c.x = node.x + node._w + NODE_GAP_X;
     assignPos(c, depth + 1, cur);
     cur += c._sh;
   }
@@ -470,7 +437,7 @@ function assignPos(node, depth, yTop) {
 function collect(node, parent, nodes, edges) {
   const item = {
     id: node.id, text: node.text, color: node.color, fontSize: node.fontSize,
-    x: node.x, y: node.y, w: node._w,
+    x: node.x, y: node.y, w: node._w, h: node._h, lines: node._lines,
     children: node.children, collapsed: node.collapsed,
   };
   nodes.push(item);
@@ -480,22 +447,7 @@ function collect(node, parent, nodes, edges) {
   }
 }
 
-function wrapText(text, maxW) {
-  const maxChars = Math.max(4, Math.floor((maxW - 16) / (FONT_SIZES.M * 0.6)));
-  const result = [];
-  for (const line of (text || '').split('\n')) {
-    if (line.length <= maxChars) { result.push(line); continue; }
-    let s = line;
-    while (s.length > maxChars) {
-      result.push(s.slice(0, maxChars));
-      s = s.slice(maxChars);
-    }
-    if (s) result.push(s);
-  }
-  return result.length ? result : [''];
-}
-
-function shade(colorKey, alpha) {
+function shade(colorKey) {
   const map = {
     red: '#fbe7e6', orange: '#fdeede', yellow: '#fdf6dd', green: '#e6f5e6',
     cyan: '#e0f4f6', blue: '#e8f1fe', purple: '#efe9fb', pink: '#fbe9f1',
