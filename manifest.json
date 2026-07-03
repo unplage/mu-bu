@@ -1,0 +1,17 @@
+{
+  "name": "Mubu-Lite 思维导图",
+  "short_name": "Mubu-Lite",
+  "description": "幕布风格的 PWA 思维导图与大纲编辑器,本地存储,可离线使用。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f7f8fa",
+  "theme_color": "#4f8cf0",
+  "lang": "zh-CN",
+  "icons": [
+    { "src": "./icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
