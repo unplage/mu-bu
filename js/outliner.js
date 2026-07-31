@@ -770,6 +770,11 @@ export class Outliner {
     if (savedRange && savedTextEl) {
       range = savedRange;
       textEl = savedTextEl;
+      // 保存期间可能已重渲染:按 nodeId 重新定位,避免用陈旧 DOM 算偏移
+      if (!textEl.isConnected && savedTextEl.dataset?.id) {
+        textEl = this.container.querySelector(`.node-text[data-id="${savedTextEl.dataset.id}"]`);
+        if (!textEl) return;
+      }
     } else {
       const sel = window.getSelection();
       if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
@@ -788,25 +793,29 @@ export class Outliner {
     preRange.setEnd(range.startContainer, range.startOffset);
     const startOffset = preRange.toString().length;
     const selectedLen = range.toString().length;
-    // 重建 spans 并着色
-    const oldSpans = f.node.spans || [{ text: f.node.text, color: null }];
+    // 重建 spans 并着色(保留加粗/斜体等富文本属性)
+    const oldSpans = (f.node.spans && f.node.spans.length) ? f.node.spans : [{ text: f.node.text || '', color: null }];
     const newSpans = [];
     let pos = 0;
     for (const sp of oldSpans) {
       const spEnd = pos + sp.text.length;
       if (spEnd <= startOffset || pos >= startOffset + selectedLen) {
-        newSpans.push({ text: sp.text, color: sp.color });
+        newSpans.push(copySpan(sp, sp.text));
       } else {
         const before = sp.text.slice(0, Math.max(0, startOffset - pos));
         const mid = sp.text.slice(Math.max(0, startOffset - pos), Math.min(sp.text.length, startOffset + selectedLen - pos));
         const after = sp.text.slice(Math.min(sp.text.length, startOffset + selectedLen - pos));
-        if (before) newSpans.push({ text: before, color: sp.color });
-        if (mid) newSpans.push({ text: mid, color: hex });
-        if (after) newSpans.push({ text: after, color: sp.color });
+        if (before) newSpans.push(copySpan(sp, before));
+        if (mid) {
+          const ms = copySpan(sp, mid);
+          ms.color = hex; // 仅被选区覆盖的片段换新颜色
+          newSpans.push(ms);
+        }
+        if (after) newSpans.push(copySpan(sp, after));
       }
       pos = spEnd;
     }
-    f.node.spans = newSpans.some((s) => s.color) ? newSpans : null;
+    f.node.spans = newSpans.some(spanStyled) ? newSpans : null;
     this._saveFocus();
     this.render();
     this._emitChange(true);

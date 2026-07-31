@@ -479,6 +479,78 @@ console.log('--- Outliner 选择模式 ---');
   assert(outliner.getSelectedIds().length === 1, '退出选择模式清除附加选中');
 }
 
+console.log('--- Outliner 选区字体颜色 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = 'Hello World';
+  const container = document.createElement('div');
+  const outliner = new Outliner(container, doc, () => {});
+  outliner.render();
+  const textEl = container.querySelector('.node-text[data-id="' + doc.root.id + '"]');
+  const realTextNode = textEl.firstChild; // 文本节点 'Hello World'
+  // 功能性的 Range mock:selectNodeContents(textEl)+setEnd(文本节点,offset) 后 toString 给出前缀文本
+  const origCreateRange = document.createRange;
+  Object.defineProperty(document, 'createRange', {
+    value: () => {
+      let el = null, endO = 0;
+      return {
+        selectNodeContents(e) { el = e; },
+        setEnd(c, o) { if (c === realTextNode) endO = o; },
+        toString() { return el ? (el.textContent || '').slice(0, endO) : ''; },
+      };
+    },
+    configurable: true, writable: true,
+  });
+  const savedRange = {
+    startContainer: realTextNode,
+    startOffset: 6,
+    toString() { return 'World'; }, // 选中 'World' (5 字符)
+  };
+  outliner.applySelectionColor('#ff0000', savedRange, textEl);
+  Object.defineProperty(document, 'createRange', { value: origCreateRange, configurable: true, writable: true });
+  const spans = doc.root.spans;
+  assert(Array.isArray(spans) && spans.length === 2, '选区着色拆为 2 段, got ' + (spans && spans.length));
+  assert(spans[0].text === 'Hello ' && spans[0].color === null, '前半保持无色');
+  assert(spans[1].text === 'World' && spans[1].color === '#ff0000', 'World 变红');
+}
+
+console.log('--- Outliner 选区着色保留富文本属性 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = 'Hello World';
+  doc.root.spans = [
+    { text: 'Hello ', b: true, color: null },
+    { text: 'World', i: true, color: null },
+  ];
+  const container = document.createElement('div');
+  const outliner = new Outliner(container, doc, () => {});
+  outliner.render();
+  const textEl = container.querySelector('.node-text[data-id="' + doc.root.id + '"]');
+  const realTextNode = textEl.firstChild; // 选中后 textEl 首个文本节点
+  const origCreateRange = document.createRange;
+  Object.defineProperty(document, 'createRange', {
+    value: () => {
+      let el = null, endO = 0;
+      return {
+        selectNodeContents(e) { el = e; },
+        setEnd(c, o) { if (c === realTextNode) endO = o; },
+        toString() { return el ? (el.textContent || '').slice(0, endO) : ''; },
+      };
+    },
+    configurable: true, writable: true,
+  });
+  const savedRange = {
+    startContainer: realTextNode,
+    startOffset: 6,
+    toString() { return 'World'; },
+  };
+  outliner.applySelectionColor('#0000ff', savedRange, textEl);
+  Object.defineProperty(document, 'createRange', { value: origCreateRange, configurable: true, writable: true });
+  const spans = doc.root.spans;
+  assert(spans[0].b === true, '前半加粗保留');
+  assert(spans[1].text === 'World' && spans[1].i === true && spans[1].color === '#0000ff', 'World 蓝色且斜体保留');
+}
+
 console.log('--- Outliner 备注行 ---');
 {
   const doc = createDoc('T');

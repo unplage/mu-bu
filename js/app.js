@@ -149,6 +149,7 @@ class App {
       fmtUnderline: $('#fmtUnderline'),
       fmtStrike: $('#fmtStrike'),
       fmtHighlight: $('#fmtHighlight'),
+      fmtColor: $('#fmtColor'),
       sortBtn: $('#sortBtn'),
       sortPopover: $('#sortPopover'),
       focusBtn: $('#focusBtn'),
@@ -897,36 +898,14 @@ class App {
         b.classList.toggle('active', parseInt(b.dataset.size) === v);
       });
     });
-    // 字体颜色
-    this.el.mmFontColor.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (this.el.fontColorPopover.hidden) {
-        // 缓存当前选区( popover 打开会丢失焦点 )
-        this._savedTextSelection = null;
-        const sel = window.getSelection();
-        if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
-          const range = sel.getRangeAt(0);
-          const container = range.startContainer.nodeType === Node.TEXT_NODE
-            ? range.startContainer.parentElement : range.startContainer;
-          if (container?.closest?.('.node-text')) {
-            this._savedTextSelection = {
-              range: range.cloneRange(),
-              textEl: container.closest('.node-text'),
-              nodeId: container.closest('.node-text').dataset.id,
-            };
-          }
-        }
-        const rect = this.el.mmFontColor.getBoundingClientRect();
-        this.el.fontColorPopover.style.position = 'fixed';
-        this.el.fontColorPopover.style.top = (rect.bottom + 6) + 'px';
-        this.el.fontColorPopover.style.right = (window.innerWidth - rect.right) + 'px';
-        this.el.fontColorPopover.style.left = 'auto';
-        this.el.fontColorPopover.hidden = false;
-        this._initFontColorGrid();
-      } else {
-        this.el.fontColorPopover.hidden = true;
-      }
-    });
+    // 字体颜色(导图工具栏)
+    // 关键:在 mousedown 时保存文本选区——点击按钮会把焦点移出 contenteditable 并清除选区,
+    // 若在 click 时才保存,选区早已丢失,只能退化为整节点着色
+    this.el.mmFontColor.addEventListener('mousedown', (e) => { e.stopPropagation(); this._saveTextSelection(); });
+    this.el.mmFontColor.addEventListener('click', (e) => this._toggleFontColorPopover(this.el.mmFontColor, e));
+    // 字体颜色(大纲工具栏)
+    this.el.fmtColor.addEventListener('mousedown', (e) => { e.stopPropagation(); this._saveTextSelection(); });
+    this.el.fmtColor.addEventListener('click', (e) => this._toggleFontColorPopover(this.el.fmtColor, e));
     this.el.fontColorApply.addEventListener('click', (e) => {
       e.stopPropagation();
       const hex = this.el.fontColorHex.value.trim();
@@ -994,7 +973,7 @@ class App {
       if (!this.el.fontSizePopover.hidden && !this.el.fontSizePopover.contains(e.target) && !this.el.mmFontSize.contains(e.target)) {
         this.el.fontSizePopover.hidden = true;
       }
-      if (!this.el.fontColorPopover.hidden && !this.el.fontColorPopover.contains(e.target) && !this.el.mmFontColor.contains(e.target)) {
+      if (!this.el.fontColorPopover.hidden && !this.el.fontColorPopover.contains(e.target) && !this.el.mmFontColor.contains(e.target) && !this.el.fmtColor.contains(e.target)) {
         this.el.fontColorPopover.hidden = true;
       }
       if (!this.el.layoutPopover.hidden && !this.el.layoutPopover.contains(e.target) && !this.el.mmLayout.contains(e.target)) {
@@ -1070,6 +1049,22 @@ class App {
       textEl: container.closest('.node-text'),
       nodeId: container.closest('.node-text').dataset.id,
     };
+  }
+
+  /** 打开/关闭字体颜色浮层(定位到触发按钮) */
+  _toggleFontColorPopover(btn, e) {
+    if (e) e.stopPropagation();
+    if (this.el.fontColorPopover.hidden) {
+      const rect = btn.getBoundingClientRect();
+      this.el.fontColorPopover.style.position = 'fixed';
+      this.el.fontColorPopover.style.top = (rect.bottom + 6) + 'px';
+      this.el.fontColorPopover.style.right = (window.innerWidth - rect.right) + 'px';
+      this.el.fontColorPopover.style.left = 'auto';
+      this.el.fontColorPopover.hidden = false;
+      this._initFontColorGrid();
+    } else {
+      this.el.fontColorPopover.hidden = true;
+    }
   }
 
   // ---------- 选中集 / 排序 ----------

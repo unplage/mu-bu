@@ -256,7 +256,7 @@ mark.search-hit { background: #ffe58a; color: inherit; border-radius: 2px; paddi
   .modal-card { margin-bottom: env(safe-area-inset-bottom); }
   .ol-actionbar { padding-bottom: calc(6px + env(safe-area-inset-bottom)); }
   /* 移动端隐藏富文本/排序/聚焦(触屏文本选区不便;纯 CSS 隐藏,不改 JS) */
-  #fmtBold, #fmtItalic, #fmtUnderline, #fmtStrike, #fmtHighlight, #sortBtn, #focusBtn { display: none; }
+  #fmtBold, #fmtItalic, #fmtUnderline, #fmtStrike, #fmtHighlight, #fmtColor, #sortBtn, #focusBtn { display: none; }
 }
 </style>
 </head>
@@ -312,6 +312,7 @@ mark.search-hit { background: #ffe58a; color: inherit; border-radius: 2px; paddi
         <button id="fmtUnderline" class="ol-btn" title="下划线 (Ctrl+U)"><u>U</u></button>
         <button id="fmtStrike" class="ol-btn" title="删除线"><s>S</s></button>
         <button id="fmtHighlight" class="ol-btn" title="高亮" style="background:#ffe58a">H</button>
+        <button id="fmtColor" class="ol-btn" title="字体颜色" style="color:var(--primary)">字色</button>
         <div class="toolbar-divider"></div>
         <button id="sortBtn" class="ol-btn" title="排序同级">⇅ 排序</button>
         <button id="focusBtn" class="ol-btn" title="聚焦当前节点">◎ 聚焦</button>
