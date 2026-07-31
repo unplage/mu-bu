@@ -1,5 +1,5 @@
 // mindmap.js — 思维导图视图(SVG 无限画布,完整编辑,自适应节点,触屏支持)
-import { el, colorCss, getTextWidth, isLightColor, shade, isMobile } from './utils.js';
+import { el, colorCss, getTextWidth, isLightColor, shade, isMobile, spanStyled, copySpan, textToHtml, spansFromDom, contentText } from './utils.js';
 import { findNode, contains, removeNodesByIds } from './tree.js';
 import * as Clipboard from './clipboard.js';
 
@@ -364,7 +364,7 @@ export class Mindmap {
     this.selectedId = newNode.id;
     this.onChange(this.doc, true);
     this.render();
-    this._startEdit(newNode);
+    this._startEdit(newNode, true);
   }
 
   _addSibling(parent, index) {
@@ -374,7 +374,7 @@ export class Mindmap {
     this.selectedId = newNode.id;
     this.onChange(this.doc, true);
     this.render();
-    this._startEdit(newNode);
+    this._startEdit(newNode, true);
   }
 
   _delete(parent, index) {
@@ -385,10 +385,11 @@ export class Mindmap {
     this.render();
   }
 
-  _startEdit(node) {
+  _startEdit(node, selectAll = false) {
     if (this.editingId === node.id) return;
     this.editingId = node.id;
-    this._editingDraft = node.text;
+    this._editingDraft = textToHtml(node.text, node.spans, node.fontColor);
+    this._editSelectAll = !!selectAll;
     this.render();
   }
 
@@ -479,7 +480,7 @@ export class Mindmap {
   render() {
     const root = this._viewRoot || this.doc.root;
     const theme = THEMES[this.doc.theme] || null;
-    this.container.style.background = theme ? theme.bg : '';
+    this.container.style.background = this.doc.bg ? this.doc.bg : (theme ? theme.bg : '');
     // 1. 测量每个节点(宽高,基于字号与文本)
     measureNode(root);
     // 2. 按当前布局分配坐标
@@ -533,26 +534,65 @@ export class Mindmap {
         const fo = document.createElementNS(ns, 'foreignObject');
         fo.setAttribute('width', n.w);
         fo.setAttribute('height', n.h);
-        const ta = el('input', {
+        const ta = el('div', {
           class: 'mm-edit',
-          type: 'text',
-          value: this._editingDraft,
+          contenteditable: 'true',
+          spellcheck: 'false',
+          dataset: { id: n.id },
           style: {
             width: (n.w - 4) + 'px',
             height: (n.h - 4) + 'px',
             fontSize: fontSize + 'px',
             lineHeight: lineH + 'px',
+            textAlign: 'left',
+            overflow: 'hidden',
           },
         });
+        ta.innerHTML = this._editingDraft || '';
         fo.append(ta);
         grp.append(fo);
         g.append(grp);
-        requestAnimationFrame(() => { ta.focus(); ta.select(); });
-        ta.addEventListener('input', () => { this._editingDraft = ta.value; });
+        requestAnimationFrame(() => {
+          try {
+            ta.focus();
+            const sel = window.getSelection();
+            const range = document.createRange();
+            range.selectNodeContents(ta);
+            // 编辑已有节点时不自动全选(只把光标放到末尾),避免残留全选被误当成用户选区
+            if (!this._editSelectAll) range.collapse(false);
+            sel.removeAllRanges();
+            sel.addRange(range);
+          } catch (_) { /* 某些环境无完整 Selection/Range 实现,忽略 */ }
+        });
+        ta.addEventListener('input', () => { this._editingDraft = ta.innerHTML; });
+        // 粘贴只保留纯文本,换行转 <br>,避免污染 spans 重建
+        ta.addEventListener('paste', (e) => {
+          e.preventDefault();
+          const txt = (e.clipboardData || window.clipboardData).getData('text/plain');
+          const sel = window.getSelection();
+          if (!sel.rangeCount) return;
+          const range = sel.getRangeAt(0);
+          range.deleteContents();
+          const frag = document.createDocumentFragment();
+          txt.split('\n').forEach((line, i) => {
+            if (i > 0) frag.appendChild(document.createElement('br'));
+            frag.appendChild(document.createTextNode(line));
+          });
+          range.insertNode(frag);
+          range.collapse(false);
+          sel.removeAllRanges();
+          sel.addRange(range);
+          ta.dispatchEvent(new Event('input', { bubbles: true }));
+        });
         const commit = () => {
           if (this.editingId !== n.id) return;
           const f = findNode(this.doc.root, n.id);
-          if (f) { f.node.text = this._editingDraft || '空节点'; this.onChange(this.doc, true); }
+          if (f) {
+            const txt = contentText(ta).replace(/^\n+|\n+$/g, '');
+            f.node.text = txt || '空节点';
+            f.node.spans = txt ? spansFromDom(ta) : null;
+            this.onChange(this.doc, true);
+          }
           this.editingId = null;
           this.render();
           this._applyTransform();
@@ -561,7 +601,8 @@ export class Mindmap {
         ta.addEventListener('keydown', (ev) => {
           // 输入法组合期不提交
           if (ev.isComposing || ev.keyCode === 229) return;
-          if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
+          if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); commit(); }
+          else if (ev.key === 'Enter') { ev.preventDefault(); document.execCommand?.('insertLineBreak', false, null); this._editingDraft = ta.innerHTML; }
           if (ev.key === 'Escape') { ev.preventDefault(); this.editingId = null; this.render(); this._applyTransform(); }
           ev.stopPropagation();
         });
@@ -856,6 +897,111 @@ export class Mindmap {
     this.onChange(this.doc, true);
     this.render();
     this._applyTransform();
+  }
+
+  /** 对导图编辑框中的当前选区应用内联格式(execCommand + 触发 input 同步 draft) */
+  applyInlineFormat(cmd, value) {
+    const editEl = this.container.querySelector('.mm-edit');
+    if (!editEl) return false;
+    if (cmd === 'hiliteColor' || cmd === 'foreColor') document.execCommand('styleWithCSS', false, true);
+    document.execCommand(cmd, false, value ?? null);
+    editEl.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  }
+
+  /** 对导图编辑框选区着色(模型级重建 spans,不依赖 execCommand;保留 b/i/u/s/hl) */
+  applySelectionColor(hex, range, textEl, charStart, charEnd) {
+    const id = textEl?.dataset?.id;
+    if (!id) return;
+    const f = findNode(this.doc.root, id);
+    if (!f) return;
+    // 先把未提交的编辑内容同步进模型(导图仅在提交时写模型,选中上色前必须先落盘)
+    const txt = contentText(textEl);
+    f.node.text = txt || '空节点';
+    f.node.spans = txt ? spansFromDom(textEl) : null;
+    // 计算选区偏移:优先用调用方算好的字符偏移(anchor/focus 直接算,不经过 Range)
+    let startOffset = typeof charStart === 'number' ? charStart : null;
+    let selectedLen = (typeof startOffset === 'number' && typeof charEnd === 'number') ? charEnd - startOffset : null;
+    if (selectedLen == null || selectedLen < 0) {
+      // 回退:Range.toString() 计算(普通 DOM 下可用)
+      try {
+        if (!range || !range.toString) return;
+        const preRange = document.createRange();
+        preRange.selectNodeContents(textEl);
+        preRange.setEnd(range.startContainer, range.startOffset);
+        startOffset = preRange.toString().length;
+        selectedLen = range.toString().length;
+      } catch (_) { return; }
+    }
+    if (selectedLen <= 0) return;
+    // 重建 spans 并着色(仅被选区覆盖的片段换新颜色)
+    const oldSpans = (f.node.spans && f.node.spans.length) ? f.node.spans : [{ text: f.node.text || '', color: null }];
+    const newSpans = [];
+    let pos = 0;
+    for (const sp of oldSpans) {
+      const spEnd = pos + sp.text.length;
+      if (spEnd <= startOffset || pos >= startOffset + selectedLen) {
+        newSpans.push(copySpan(sp, sp.text));
+      } else {
+        const before = sp.text.slice(0, Math.max(0, startOffset - pos));
+        const mid = sp.text.slice(Math.max(0, startOffset - pos), Math.min(sp.text.length, startOffset + selectedLen - pos));
+        const after = sp.text.slice(Math.min(sp.text.length, startOffset + selectedLen - pos));
+        if (before) newSpans.push(copySpan(sp, before));
+        if (mid) { const ms = copySpan(sp, mid); ms.color = hex; newSpans.push(ms); }
+        if (after) newSpans.push(copySpan(sp, after));
+      }
+      pos = spEnd;
+    }
+    f.node.spans = newSpans.some(spanStyled) ? newSpans : null;
+    this._editingDraft = textToHtml(f.node.text, f.node.spans, f.node.fontColor);
+    // 更新打开中的编辑框(文本长度不变,按原偏移恢复选区),保持编辑态不中断
+    const editEl = this.container.querySelector('.mm-edit');
+    if (editEl) {
+      const endOffset = startOffset + selectedLen;
+      editEl.innerHTML = this._editingDraft;
+      this._restoreTextRange(editEl, startOffset, endOffset);
+    }
+    this.onChange(this.doc, true);
+    // 非编辑态(无存活编辑框可显示颜色):立即重绘,避免改动延迟到下次 render 才显现
+    if (!editEl) {
+      this.render();
+      this._applyTransform();
+    }
+  }
+
+  /** 按文本偏移重建编辑框选区(跨 span/文本节点) */
+  _restoreTextRange(el, startOff, endOff) {
+    try {
+      const sel = window.getSelection();
+      if (!sel) return;
+      const s = this._textNodeAt(el, startOff);
+      const e = this._textNodeAt(el, endOff);
+      if (!s || !e) return;
+      const range = document.createRange();
+      range.setStart(s.node, s.offset);
+      range.setEnd(e.node, e.offset);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch (_) { /* 无法恢复选区时忽略 */ }
+  }
+
+  _textNodeAt(el, offset) {
+    let remaining = offset;
+    const find = (n) => {
+      if (n.nodeType === Node.TEXT_NODE) {
+        if (remaining <= n.textContent.length) return { node: n, offset: remaining };
+        remaining -= n.textContent.length;
+        return null;
+      }
+      if (n.nodeName === 'BR') {
+        // <br> 占 1 个字符,与 node.text 的 \n 计数一致;边界落在 <br> 后的位置交给后续文本节点
+        remaining -= 1;
+        return null;
+      }
+      for (const c of n.childNodes) { const r = find(c); if (r) return r; }
+      return null;
+    };
+    return find(el);
   }
 
   countNodes() {
@@ -1172,11 +1318,6 @@ function previousSiblingId(root, id) {
   };
   rec(root);
   return found ? (prev ? prev.id : null) : null;
-}
-
-/** span 是否带任何样式 */
-function spanStyled(sp) {
-  return !!(sp && (sp.color || sp.b || sp.i || sp.u || sp.s || sp.hl));
 }
 
 /** 将节点的 spans 按换行拆分为每行的 span 片段(供 tspan 渲染,保留富文本属性) */

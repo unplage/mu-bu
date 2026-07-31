@@ -1,13 +1,30 @@
 // app.js — 主控制器
 import { Outliner } from './outliner.js';
-import { Mindmap } from './mindmap.js';
+import { Mindmap, THEMES } from './mindmap.js';
 import * as DB from './db.js';
 import * as Export from './export.js';
 import * as Share from './share.js';
-import { el, COLORS, formatDate, debounce, isMobile } from './utils.js';
+import { el, COLORS, formatDate, debounce, isMobile, charOffsetIn } from './utils.js';
 import { findNode, countText, sortSiblings, flattenVisible } from './tree.js';
 
 const $ = (s) => document.querySelector(s);
+
+// 画布背景(桌布)预设色——覆盖浅/中调/饱和/深色全色阶
+const CANVAS_BG_COLORS = [
+  // 浅色中性 + 浅粉彩
+  '#ffffff', '#f7f8fa', '#f0f1f3', '#fbf7ef',
+  '#eef4fb', '#eff6ee', '#fdf3ef', '#eef7f4',
+  '#f4f0fa', '#fdf0f0', '#eaf6f9', '#f6f0e8',
+  // 中调
+  '#dbe7f5', '#d9efdd', '#fbe3d3', '#f3d9e4',
+  '#e0d6f2', '#d6eef0', '#f0e3c8', '#d5e8e0',
+  // 饱和
+  '#4f8cf0', '#5cb85c', '#f0a04b', '#e0674f',
+  '#9b7bd8', '#ec7cad', '#3bb8c4', '#e6c34a',
+  // 深色
+  '#2b333b', '#1f2937', '#2c3e50', '#34495e',
+  '#1e3a2f', '#3d2e1f', '#33294a', '#4a2020',
+];
 
 class App {
   constructor() {
@@ -141,6 +158,12 @@ class App {
       colorHexInput: $('#colorHexInput'),
       colorHexApply: $('#colorHexApply'),
       colorClear: $('#colorClear'),
+      bgPopover: $('#bgPopover'),
+      bgGrid: $('#bgGrid'),
+      bgHexInput: $('#bgHexInput'),
+      bgHexApply: $('#bgHexApply'),
+      bgClear: $('#bgClear'),
+      mmBg: $('#mmBg'),
       layoutPopover: $('#layoutPopover'),
       indentBtn: $('#indentBtn'),
       outdentBtn: $('#outdentBtn'),
@@ -256,7 +279,6 @@ class App {
     const fmtCmd = (cmd) => ({
       mousedown: (e) => { e.preventDefault(); this._saveTextSelection(); },
       click: () => {
-        if (!this.outliner) return;
         const saved = this._savedTextSelection;
         this._savedTextSelection = null;
         if (!saved?.range) { this.toast('请先选中要格式化的文本'); return; }
@@ -264,7 +286,11 @@ class App {
         saved.textEl.focus();
         sel.removeAllRanges();
         sel.addRange(saved.range);
-        this.outliner.applyInlineFormat(cmd);
+        if (saved.textEl.closest('.mm-edit')) {
+          this.mindmap?.applyInlineFormat(cmd);
+        } else if (this.outliner) {
+          this.outliner.applyInlineFormat(cmd);
+        }
       },
     });
     for (const [btn, cmd] of [
@@ -627,6 +653,63 @@ class App {
   }
   _hideColorPopover() { this.el.colorPopover.hidden = true; }
 
+  // ---------- 画布背景(桌布) ----------
+  _initBgGrid() {
+    if (this._bgGridInited) return;
+    this._bgGridInited = true;
+    this.el.bgGrid.replaceChildren(
+      ...CANVAS_BG_COLORS.map((c) => el('div', {
+        class: 'color-swatch',
+        style: { background: c },
+        title: c,
+        dataset: { color: c },
+      }))
+    );
+    this.el.bgGrid.addEventListener('click', (e) => {
+      const sw = e.target.closest('.color-swatch');
+      if (!sw) return;
+      this._applyBg(sw.dataset.color);
+      this._hideBgPopover();
+    });
+    this.el.bgHexApply.addEventListener('click', () => {
+      const hex = this.el.bgHexInput.value.trim();
+      if (/^#[0-9a-fA-F]{6}$/.test(hex)) { this._applyBg(hex.toLowerCase()); this._hideBgPopover(); }
+      else this.toast('请输入 #ffffff 格式的颜色');
+    });
+    this.el.bgClear.addEventListener('click', () => {
+      this._applyBg(null);
+      this._hideBgPopover();
+    });
+  }
+
+  /** 设置画布背景(doc.bg,hex 或 null=跟随主题) */
+  _applyBg(hex) {
+    if (!this.doc) return;
+    this.doc.bg = hex || null;
+    if (this.mindmap) { this.mindmap.render(); this.mindmap._applyTransform(); }
+    this._onChange(this.doc, true);
+  }
+
+  _toggleBgPopover(e) {
+    e.stopPropagation();
+    if (this.el.bgPopover.hidden) {
+      const rect = this.el.mmBg.getBoundingClientRect();
+      this.el.bgPopover.style.position = 'fixed';
+      this.el.bgPopover.style.top = (rect.bottom + 6) + 'px';
+      this.el.bgPopover.style.right = (window.innerWidth - rect.right) + 'px';
+      this.el.bgPopover.style.left = 'auto';
+      this.el.bgPopover.hidden = false;
+      this._initBgGrid();
+      const cur = this.doc?.bg || '';
+      this.el.bgGrid.querySelectorAll('.color-swatch').forEach((s) => {
+        s.classList.toggle('active', s.dataset.color === cur);
+      });
+    } else {
+      this._hideBgPopover();
+    }
+  }
+  _hideBgPopover() { this.el.bgPopover.hidden = true; }
+
   /** 获取节点字号(数字) */
   _getNodeFontSize(node) {
     if (!node) return 14;
@@ -661,7 +744,23 @@ class App {
   /** 应用字体颜色到选中节点 */
   _applyFontColorToSelected(hex) {
     if (this.view === 'mindmap' && this.mindmap) {
-      this.mindmap.applyFontColor(hex);
+      // isConnected:拒绝残留的已脱离文档选区,避免误路由到不重绘的 applySelectionColor
+      const inEditEl = (el) => el && el.isConnected && (el.closest?.('.mm-edit') || el.classList?.contains('mm-edit'));
+      // 优先用缓存的选区( popover 打开会丢失焦点 )
+      const saved = this._savedTextSelection;
+      this._savedTextSelection = null;
+      if (saved && saved.textEl && inEditEl(saved.textEl) && saved.charEnd > saved.charStart) {
+        this.mindmap.applySelectionColor(hex, saved.range, saved.textEl, saved.charStart, saved.charEnd);
+      } else {
+        // 回退到实时 Selection
+        const sel = window.getSelection();
+        const offs = sel && sel.rangeCount > 0 && !sel.isCollapsed ? this._captureCharOffsets(sel) : null;
+        if (offs && inEditEl(offs.textEl) && offs.charEnd > offs.charStart) {
+          this.mindmap.applySelectionColor(hex, offs.range, offs.textEl, offs.charStart, offs.charEnd);
+        } else {
+          this.mindmap.applyFontColor(hex);
+        }
+      }
     } else if (this.outliner) {
       // 优先用缓存的选区( popover 打开会丢失焦点 )
       const saved = this._savedTextSelection;
@@ -774,7 +873,9 @@ class App {
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     const svg = this.el.mindmapCanvas.querySelector('svg');
     if (!svg) throw new Error('思维导图未就绪');
-    await Export.exportPNG(svg, this.doc.title);
+    const theme = THEMES[this.doc?.theme];
+    const bgColor = this.doc?.bg || theme?.bg || '#ffffff';
+    await Export.exportPNG(svg, this.doc.title, bgColor);
   }
   _exportSVG() {
     const wasOutline = this.view === 'outline';
@@ -901,10 +1002,10 @@ class App {
     // 字体颜色(导图工具栏)
     // 关键:在 mousedown 时保存文本选区——点击按钮会把焦点移出 contenteditable 并清除选区,
     // 若在 click 时才保存,选区早已丢失,只能退化为整节点着色
-    this.el.mmFontColor.addEventListener('mousedown', (e) => { e.stopPropagation(); this._saveTextSelection(); });
+    this.el.mmFontColor.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); this._saveTextSelection(); });
     this.el.mmFontColor.addEventListener('click', (e) => this._toggleFontColorPopover(this.el.mmFontColor, e));
     // 字体颜色(大纲工具栏)
-    this.el.fmtColor.addEventListener('mousedown', (e) => { e.stopPropagation(); this._saveTextSelection(); });
+    this.el.fmtColor.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); this._saveTextSelection(); });
     this.el.fmtColor.addEventListener('click', (e) => this._toggleFontColorPopover(this.el.fmtColor, e));
     this.el.fontColorApply.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -924,6 +1025,8 @@ class App {
       e.stopPropagation();
       this._toggleColorPopover(e, this.el.mmColor);
     });
+    // 画布背景(桌布)
+    this.el.mmBg.addEventListener('click', (e) => this._toggleBgPopover(e));
     this.el.colorHexApply.addEventListener('click', (e) => {
       e.stopPropagation();
       const hex = this.el.colorHexInput.value.trim();
@@ -982,6 +1085,9 @@ class App {
       if (!this.el.colorPopover.hidden && !this.el.colorPopover.contains(e.target) && !this.el.mmColor.contains(e.target)) {
         this._hideColorPopover();
       }
+      if (!this.el.bgPopover.hidden && !this.el.bgPopover.contains(e.target) && !this.el.mmBg.contains(e.target)) {
+        this._hideBgPopover();
+      }
     });
   }
 
@@ -1036,18 +1142,33 @@ class App {
   }
 
   // ---------- 富文本选区缓存 ----------
+  /** 从 Selection 捕获编辑元素内的字符选区偏移(不依赖 Range.toString,兼容 SVG foreignObject) */
+  _captureCharOffsets(sel) {
+    const anchor = sel.anchorNode;
+    const anchorEl = anchor && anchor.nodeType === Node.TEXT_NODE ? anchor.parentElement : anchor;
+    if (!anchorEl?.closest?.('.node-text, .mm-edit')) return null;
+    const editEl = anchorEl.closest('.node-text, .mm-edit');
+    // 拒绝残留的已脱离文档选区(旧 mm-edit 被 render 移除后,Selection 可能仍引用它)
+    if (!editEl.isConnected) return null;
+    let range = null;
+    try { range = sel.getRangeAt(0).cloneRange(); } catch (_) { /* 大纲路径需要 range,拿不到则忽略 */ }
+    const start = charOffsetIn(editEl, sel.anchorNode, sel.anchorOffset);
+    const end = charOffsetIn(editEl, sel.focusNode, sel.focusOffset);
+    return { textEl: editEl, range, charStart: Math.min(start, end), charEnd: Math.max(start, end) };
+  }
+
   _saveTextSelection() {
     this._savedTextSelection = null;
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
-    const range = sel.getRangeAt(0);
-    const container = range.startContainer.nodeType === Node.TEXT_NODE
-      ? range.startContainer.parentElement : range.startContainer;
-    if (!container?.closest?.('.node-text')) return;
+    const offs = this._captureCharOffsets(sel);
+    if (!offs) return;
     this._savedTextSelection = {
-      range: range.cloneRange(),
-      textEl: container.closest('.node-text'),
-      nodeId: container.closest('.node-text').dataset.id,
+      range: offs.range,
+      textEl: offs.textEl,
+      nodeId: offs.textEl.dataset.id,
+      charStart: offs.charStart,
+      charEnd: offs.charEnd,
     };
   }
 
@@ -1251,7 +1372,7 @@ class App {
   }
 
   _hideAllPopovers() {
-    [this.el.fontSizePopover, this.el.fontColorPopover, this.el.layoutPopover, this.el.colorPopover, this.el.sortPopover]
+    [this.el.fontSizePopover, this.el.fontColorPopover, this.el.layoutPopover, this.el.colorPopover, this.el.sortPopover, this.el.bgPopover]
       .forEach((p) => { if (p) p.hidden = true; });
   }
 

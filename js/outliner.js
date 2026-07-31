@@ -1,5 +1,5 @@
 // outliner.js — 大纲视图渲染与编辑(虚拟化渲染:只渲染可视窗口内的行)
-import { el, escapeHtml, colorCss } from './utils.js';
+import { el, escapeHtml, colorCss, spanStyled, copySpan, textToHtml, spansFromDom } from './utils.js';
 import { createNode } from './db.js';
 import * as Clipboard from './clipboard.js';
 import {
@@ -1211,121 +1211,6 @@ function textToModel(textEl) {
     else if (n.nodeName === 'SPAN') out += n.textContent;
   });
   return out;
-}
-
-/** span 是否带任何样式(颜色/加粗/斜体/下划线/删除线/高亮) */
-function spanStyled(sp) {
-  return !!(sp && (sp.color || sp.b || sp.i || sp.u || sp.s || sp.hl));
-}
-
-/** 复制 span 属性到新文本 */
-function copySpan(sp, text) {
-  return { text, color: sp?.color || null, b: !!sp?.b, i: !!sp?.i, u: !!sp?.u, s: !!sp?.s, hl: sp?.hl || null };
-}
-
-/** span 的 CSS 样式串 */
-function spanStyle(sp) {
-  const parts = [];
-  if (sp.color) parts.push(`color:${sp.color}`);
-  if (sp.b) parts.push('font-weight:bold');
-  if (sp.i) parts.push('font-style:italic');
-  const deco = [];
-  if (sp.u) deco.push('underline');
-  if (sp.s) deco.push('line-through');
-  if (deco.length) parts.push(`text-decoration:${deco.join(' ')}`);
-  if (sp.hl) parts.push(`background:${sp.hl}`);
-  return parts.join(';');
-}
-
-function textToHtml(text, spans, fontColor) {
-  if (!text) return '';
-  const hasSpans = Array.isArray(spans) && spans.length > 0 && spans.some(spanStyled);
-  if (!hasSpans) {
-    // 无逐字样式:纯文本 + <br>
-    const lines = escapeHtml(text).split('\n');
-    return lines.map((l, i) => i === 0 ? l : '<br>' + l).join('');
-  }
-  // 有 spans:按 \n 拆行,每行内按 span 片段渲染 <span style="...">
-  const result = [];
-  let pos = 0;
-  for (let lineIdx = 0; ; lineIdx++) {
-    const nlIdx = text.indexOf('\n', pos);
-    const lineEnd = nlIdx === -1 ? text.length : nlIdx;
-    const lineText = text.slice(pos, lineEnd);
-    if (lineIdx > 0) result.push('<br>');
-    // 渲染该行的 spans
-    let linePos = 0;
-    for (const sp of spans) {
-      const spStart = linePos;
-      const spEnd = linePos + sp.text.length;
-      if (spEnd <= pos || spStart >= lineEnd) { linePos = spEnd; continue; }
-      const clipStart = Math.max(spStart, pos) - spStart;
-      const clipEnd = Math.min(spEnd, lineEnd) - spStart;
-      const segment = sp.text.slice(clipStart, clipEnd);
-      if (segment) {
-        const style = spanStyle(sp);
-        if (style) result.push(`<span style="${style}">${escapeHtml(segment)}</span>`);
-        else result.push(escapeHtml(segment));
-      }
-      linePos = spEnd;
-    }
-    if (nlIdx === -1) break;
-    pos = nlIdx + 1;
-  }
-  return result.join('');
-}
-
-/** 从 contenteditable DOM 重建 spans 数组(沿祖先收集有效样式) */
-function spansFromDom(textEl) {
-  const spans = [];
-  let hasStyle = false;
-  // 沿祖先链汇总某文本节点上的生效样式
-  const effectiveStyle = (el) => {
-    const sp = { color: null, b: false, i: false, u: false, s: false, hl: null };
-    let node = el;
-    while (node && node !== textEl) {
-      const name = node.nodeName;
-      const st = node.style;
-      if (name === 'B' || name === 'STRONG' || name === 'SPAN') {
-        const fw = st ? st.fontWeight : null;
-        if (name === 'B' || name === 'STRONG' || fw === 'bold' || (fw && parseInt(fw, 10) >= 600)) sp.b = true;
-        if (st && st.color) sp.color = st.color;
-        if (st && st.fontStyle === 'italic') sp.i = true;
-        if (st && /underline/.test(st.textDecoration)) sp.u = true;
-        if (st && /line-through/.test(st.textDecoration)) sp.s = true;
-        if (st && /^#/.test(st.backgroundColor)) sp.hl = st.backgroundColor;
-      } else if (name === 'I' || name === 'EM') {
-        sp.i = true;
-      } else if (name === 'U') {
-        sp.u = true;
-      } else if (name === 'S' || name === 'STRIKE' || name === 'DEL') {
-        sp.s = true;
-      } else if (name === 'MARK') {
-        sp.hl = '#ffff00';
-      }
-      node = node.parentElement;
-    }
-    return sp;
-  };
-  const walk = (n) => {
-    if (n.nodeType === Node.TEXT_NODE) {
-      if (n.textContent) {
-        const st = effectiveStyle(n.parentElement);
-        if (spanStyled(st)) hasStyle = true;
-        spans.push(copySpan(st, n.textContent));
-      }
-    } else if (n.nodeName === 'BR') {
-      spans.push({ text: '\n', color: null });
-    } else if (n.nodeName === 'DIV') {
-      // contenteditable 换行可能生成 DIV,保留结构
-      if (spans.length > 0) spans.push({ text: '\n', color: null });
-      n.childNodes.forEach(walk);
-    } else {
-      n.childNodes.forEach(walk);
-    }
-  };
-  walk(textEl);
-  return hasStyle && spans.length > 0 ? spans : null;
 }
 
 /** 在指定偏移量处拆分 spans 数组(保留富文本属性) */

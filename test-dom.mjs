@@ -26,6 +26,7 @@ globalThis.atob = (s) => Buffer.from(s, 'base64').toString('binary');
 
 const { Outliner } = await import('./js/outliner.js');
 const { createDoc, createNode } = await import('./js/db.js');
+const { textToHtml, spansFromDom, contentText, charOffsetIn } = await import('./js/utils.js');
 
 let pass = 0, fail = 0;
 function assert(c, m) { if (c) { pass++; console.log('  ✓', m); } else { fail++; console.log('  ✗', m); } }
@@ -575,6 +576,58 @@ console.log('--- Outliner 备注行 ---');
   bNote.textContent = '新备注';
   bNote.dispatchEvent(new window.Event('input'));
   assert(doc.root.children[1].note === '新备注', '备注输入更新模型, got ' + doc.root.children[1].note);
+}
+
+console.log('--- 富文本 span 工具(textToHtml / spansFromDom 往返) ---');
+{
+  const spans = [
+    { text: '加粗', color: null, b: true, i: false, u: false, s: false, hl: null },
+    { text: '\n', color: null },
+    { text: '蓝+斜', color: '#0000ff', b: false, i: true, u: false, s: false, hl: null },
+  ];
+  const html = textToHtml('加粗\n蓝+斜', spans);
+  assert(html.indexOf('<b>') === -1, 'textToHtml 用 span style 而非 <b>(got ' + html.slice(0, 30) + ')');
+  const editEl = document.createElement('div');
+  editEl.innerHTML = html;
+  const rebuilt = spansFromDom(editEl);
+  assert(rebuilt !== null, 'spansFromDom 能重建样式 spans');
+  assert(rebuilt[0].b === true, '首段加粗保留');
+  assert(rebuilt[1].text === '\n', '换行 span 保留');
+  assert(rebuilt[2].color === '#0000ff' && rebuilt[2].i === true, '第二段颜色+斜体保留');
+  assert(rebuilt.map((s) => s.text).join('') === '加粗\n蓝+斜', '拼接文本与原文一致');
+
+  const plain = document.createElement('div');
+  plain.innerHTML = textToHtml('纯文本\n第二行', null);
+  assert(spansFromDom(plain) === null, '纯文本多行 spans 重建为 null(无样式)');
+  assert(contentText(plain) === '纯文本\n第二行', 'contentText 提取 <br> 为换行, got ' + JSON.stringify(contentText(plain)));
+
+  const fontEl = document.createElement('div');
+  fontEl.innerHTML = '红<font color="#c0392b">字</font>';
+  const fontSpans = spansFromDom(fontEl);
+  assert(fontSpans && fontSpans[1].color === '#c0392b', 'spansFromDom 识别 <font color> (execCommand foreColor 兜底)');
+}
+
+console.log('--- charOffsetIn 字符偏移(不依赖 Range.toString) ---');
+{
+  const div = document.createElement('div');
+  div.innerHTML = 'abcdef';
+  const t = div.firstChild;
+  assert(charOffsetIn(div, t, 3) === 3, '纯文本偏移 3, got ' + charOffsetIn(div, t, 3));
+  assert(charOffsetIn(div, t, 6) === 6, '纯文本偏移 6, got ' + charOffsetIn(div, t, 6));
+
+  const multi = document.createElement('div');
+  multi.innerHTML = 'ab<br>cd'; // contentText = "ab\ncd"(5 字符)
+  const [t1, br, t2] = multi.childNodes;
+  assert(charOffsetIn(multi, t1, 2) === 2, 'br 前文本末尾偏移, got ' + charOffsetIn(multi, t1, 2));
+  assert(charOffsetIn(multi, br, 0) === 2, 'br 节点位置偏移 2, got ' + charOffsetIn(multi, br, 0));
+  assert(charOffsetIn(multi, t2, 0) === 3, 'br 后文本起点偏移 3, got ' + charOffsetIn(multi, t2, 0));
+  assert(charOffsetIn(multi, t2, 2) === 5, 'br 后文本末尾偏移 5, got ' + charOffsetIn(multi, t2, 2));
+  assert(contentText(multi) === 'ab\ncd', 'contentText 与 charOffsetIn 口径一致');
+
+  const nested = document.createElement('div');
+  nested.innerHTML = '<span>ab</span>cd';
+  assert(charOffsetIn(nested, nested.firstChild.firstChild, 1) === 1, '嵌套 span 内偏移, got ' + charOffsetIn(nested, nested.firstChild.firstChild, 1));
+  assert(charOffsetIn(nested, nested.lastChild, 1) === 3, '嵌套后文本偏移, got ' + charOffsetIn(nested, nested.lastChild, 1));
 }
 
 console.log(`\n=== DOM 测试: ${pass} passed, ${fail} failed ===`);

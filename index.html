@@ -66,7 +66,7 @@ input, textarea { font-family: inherit; }
 .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .icon-btn.danger:hover { color: var(--danger); background: rgba(229,83,75,0.1); }
 
-.toolbar { height: var(--toolbar-h); flex-shrink: 0; display: flex; align-items: center; gap: 6px; padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--bg-elev); }
+.toolbar { height: var(--toolbar-h); flex-shrink: 0; display: flex; align-items: center; gap: 6px; padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--bg-elev); overflow-x: auto; }
 .doc-title { border: none; background: transparent; font-size: 15px; font-weight: 600; color: var(--text); outline: none; padding: 4px 6px; border-radius: var(--radius-sm); flex: 0 1 auto; min-width: 80px; }
 .doc-title:focus { background: var(--bg); }
 .toolbar-spacer { flex: 1; }
@@ -134,8 +134,7 @@ mark.search-hit { background: #ffe58a; color: inherit; border-radius: 2px; paddi
 .mm-btn { height: 30px; padding: 0 8px; border: none; background: transparent; border-radius: 4px; color: var(--text-soft); font-size: 12px; display: flex; align-items: center; justify-content: center; min-width: 32px; }
 .mm-btn:hover { background: var(--bg); color: var(--text); }
 .mm-divider { height: 1px; background: var(--border); margin: 2px 4px; }
-.ol-toolbar { position: absolute; top: 12px; right: 16px; z-index: 15; display: flex; align-items: center; gap: 3px; background: var(--bg-elev); padding: 4px 6px; border-radius: var(--radius); box-shadow: var(--shadow); border: 1px solid var(--border); }
-.ol-btn { height: 26px; min-width: 26px; padding: 0 7px; border: none; background: transparent; border-radius: 4px; color: var(--text-soft); font-size: 13px; cursor: pointer; }
+.ol-btn { height: 26px; min-width: 26px; padding: 0 7px; border: none; background: transparent; border-radius: 4px; color: var(--text-soft); font-size: 13px; cursor: pointer; flex-shrink: 0; white-space: nowrap; }
 .ol-btn:hover { background: var(--bg); color: var(--text); }
 .ol-btn.active { background: var(--primary-soft); color: var(--primary); }
 .ol-searchbar { position: absolute; top: 54px; right: 16px; z-index: 15; display: flex; align-items: center; gap: 4px; background: var(--bg-elev); padding: 5px 8px; border-radius: var(--radius); box-shadow: var(--shadow); border: 1px solid var(--border); }
@@ -197,6 +196,7 @@ mark.search-hit { background: #ffe58a; color: inherit; border-radius: 2px; paddi
 .popover[hidden] { display: none; }
 .popover-title { font-size: 12px; color: var(--text-faint); margin-bottom: 8px; }
 .color-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 8px; }
+#bgGrid { max-height: 280px; overflow-y: auto; }
 .color-swatch { width: 32px; height: 32px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; transition: 0.1s; }
 .color-swatch:hover { transform: scale(1.1); }
 .color-swatch.active { border-color: var(--text); }
@@ -243,7 +243,6 @@ mark.search-hit { background: #ffe58a; color: inherit; border-radius: 2px; paddi
   .doc-title { font-size: 14px; }
   /* 主工具栏与浮层工具栏横向可滚动,避免溢出被截断 */
   .toolbar { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  .ol-toolbar { left: 8px; right: 8px; top: 8px; max-width: none; overflow-x: auto; -webkit-overflow-scrolling: touch; justify-content: flex-start; }
   .ol-searchbar { left: 8px; right: 8px; top: 54px; max-width: none; }
   .ol-tagbar { left: 8px; right: 8px; top: 100px; max-width: none; }
   /* 触控目标放大 */
@@ -287,6 +286,20 @@ mark.search-hit { background: #ffe58a; color: inherit; border-radius: 2px; paddi
         <button id="viewMindmap" class="seg-btn">思维导图</button>
       </div>
       <div class="toolbar-divider"></div>
+      <button id="fmtBold" class="ol-btn" title="加粗 (Ctrl+B)"><b>B</b></button>
+      <button id="fmtItalic" class="ol-btn" title="斜体 (Ctrl+I)"><i>I</i></button>
+      <button id="fmtUnderline" class="ol-btn" title="下划线 (Ctrl+U)"><u>U</u></button>
+      <button id="fmtStrike" class="ol-btn" title="删除线"><s>S</s></button>
+      <button id="fmtHighlight" class="ol-btn" title="高亮" style="background:#ffe58a">H</button>
+      <button id="fmtColor" class="ol-btn" title="字体颜色" style="color:var(--primary)">字色</button>
+      <div class="toolbar-divider"></div>
+      <button id="sortBtn" class="ol-btn" title="排序同级">⇅ 排序</button>
+      <button id="focusBtn" class="ol-btn" title="聚焦当前节点">◎ 聚焦</button>
+      <button id="presentBtn" class="ol-btn" title="放映演示">▶ 放映</button>
+      <div class="toolbar-divider"></div>
+      <button id="searchToggle" class="ol-btn" title="搜索/替换 (Ctrl+F)">🔍</button>
+      <button id="tocBtn" class="ol-btn" title="文档目录">☷</button>
+      <div class="toolbar-divider"></div>
       <button id="collapseAll" class="icon-btn" title="全部折叠">⇲</button>
       <button id="expandAll" class="icon-btn" title="全部展开">⇱</button>
       <div class="toolbar-divider"></div>
@@ -306,21 +319,6 @@ mark.search-hit { background: #ffe58a; color: inherit; border-radius: 2px; paddi
         <span id="focusTitle" class="ol-focustitle"></span>
       </div>
       <div id="olStatus" class="ol-status"></div>
-      <div id="olToolbar" class="ol-toolbar">
-        <button id="fmtBold" class="ol-btn" title="加粗 (Ctrl+B)"><b>B</b></button>
-        <button id="fmtItalic" class="ol-btn" title="斜体 (Ctrl+I)"><i>I</i></button>
-        <button id="fmtUnderline" class="ol-btn" title="下划线 (Ctrl+U)"><u>U</u></button>
-        <button id="fmtStrike" class="ol-btn" title="删除线"><s>S</s></button>
-        <button id="fmtHighlight" class="ol-btn" title="高亮" style="background:#ffe58a">H</button>
-        <button id="fmtColor" class="ol-btn" title="字体颜色" style="color:var(--primary)">字色</button>
-        <div class="toolbar-divider"></div>
-        <button id="sortBtn" class="ol-btn" title="排序同级">⇅ 排序</button>
-        <button id="focusBtn" class="ol-btn" title="聚焦当前节点">◎ 聚焦</button>
-        <button id="presentBtn" class="ol-btn" title="放映演示">▶ 放映</button>
-        <div class="toolbar-divider"></div>
-        <button id="searchToggle" class="ol-btn" title="搜索/替换 (Ctrl+F)">🔍</button>
-        <button id="tocBtn" class="ol-btn" title="文档目录">☷</button>
-      </div>
       <div id="searchBar" class="ol-searchbar" hidden>
         <input id="searchInput" type="text" placeholder="搜索节点内容…" />
         <button id="searchPrev" class="ol-btn" title="上一个 (Shift+Enter)">↑</button>
@@ -360,6 +358,7 @@ mark.search-hit { background: #ffe58a; color: inherit; border-radius: 2px; paddi
         <button id="mmFontSize" class="mm-btn" title="字号">字号</button>
         <button id="mmFontColor" class="mm-btn" title="字体颜色">字色</button>
         <button id="mmColor" class="mm-btn" title="背景色">背景</button>
+        <button id="mmBg" class="mm-btn" title="画布背景">桌布</button>
         <button id="mmLayout" class="mm-btn" title="布局">布局</button>
         <div class="mm-divider"></div>
         <button id="mmZoomIn" class="mm-btn">＋</button>
@@ -379,6 +378,16 @@ mark.search-hit { background: #ffe58a; color: inherit; border-radius: 2px; paddi
     <button id="colorHexApply" class="btn btn-ghost" style="font-size:12px">应用</button>
   </div>
   <button id="colorClear" class="btn btn-ghost btn-block" style="margin-top:4px;font-size:12px">清除颜色</button>
+</div>
+
+<div id="bgPopover" class="popover" hidden>
+  <div class="popover-title">画布背景（桌布）</div>
+  <div class="color-grid" id="bgGrid"></div>
+  <div style="display:flex;gap:4px;margin-top:8px">
+    <input id="bgHexInput" type="text" placeholder="#ffffff" maxlength="7" style="flex:1;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px">
+    <button id="bgHexApply" class="btn btn-ghost" style="font-size:12px">应用</button>
+  </div>
+  <button id="bgClear" class="btn btn-ghost btn-block" style="margin-top:4px;font-size:12px">清除（跟随主题）</button>
 </div>
 
 <div id="fontSizePopover" class="popover" hidden>

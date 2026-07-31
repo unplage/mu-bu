@@ -451,5 +451,15 @@ console.log('--- clipboard 序列化/反序列化 ---');
   assert(!Clipboard.isNodeClipboard('not json'), '非法剪贴板识别');
 }
 
+console.log('--- validateDoc 画布背景字段 ---');
+{
+  const d = Export.validateDoc({ title: 't', root: { text: 'x', children: [] }, bg: '#ffeeee', theme: 'ocean' });
+  assert(d.bg === '#ffeeee' && d.theme === 'ocean', '合法 bg/theme 保留');
+  const bad = Export.validateDoc({ title: 't', root: { text: 'x', children: [] }, bg: 'notacolor' });
+  assert(bad.bg === null, '非法 bg 归一化为 null');
+  const old = Export.validateDoc({ title: 't', root: { text: 'x', children: [] } });
+  assert(old.bg === null, '旧文档无 bg 字段兜底为 null');
+}
+
 console.log(`\n=== ${pass} passed, ${fail} failed ===`);
 process.exit(fail ? 1 : 0);

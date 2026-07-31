@@ -189,3 +189,161 @@ export async function gzipDecompress(bytes) {
 
 /** 是否为移动设备(UA 判断) */
 export const isMobile = typeof navigator !== 'undefined' && /Mobi|Android|iPhone/i.test(navigator.userAgent || '');
+
+// ---------- 富文本 span 工具(大纲/导图共用) ----------
+
+/** span 是否带任何样式(颜色/加粗/斜体/下划线/删除线/高亮) */
+export function spanStyled(sp) {
+  return !!(sp && (sp.color || sp.b || sp.i || sp.u || sp.s || sp.hl));
+}
+
+/** 复制 span 属性到新文本 */
+export function copySpan(sp, text) {
+  return { text, color: sp?.color || null, b: !!sp?.b, i: !!sp?.i, u: !!sp?.u, s: !!sp?.s, hl: sp?.hl || null };
+}
+
+/** span 的 CSS 样式串 */
+export function spanStyle(sp) {
+  const parts = [];
+  if (sp.color) parts.push(`color:${sp.color}`);
+  if (sp.b) parts.push('font-weight:bold');
+  if (sp.i) parts.push('font-style:italic');
+  const deco = [];
+  if (sp.u) deco.push('underline');
+  if (sp.s) deco.push('line-through');
+  if (deco.length) parts.push(`text-decoration:${deco.join(' ')}`);
+  if (sp.hl) parts.push(`background:${sp.hl}`);
+  return parts.join(';');
+}
+
+/** 将节点文本与 spans 渲染为可编辑 HTML(纯文本用 <br> 换行) */
+export function textToHtml(text, spans, fontColor) {
+  if (!text) return '';
+  const hasSpans = Array.isArray(spans) && spans.length > 0 && spans.some(spanStyled);
+  if (!hasSpans) {
+    // 无逐字样式:纯文本 + <br>
+    const lines = escapeHtml(text).split('\n');
+    return lines.map((l, i) => i === 0 ? l : '<br>' + l).join('');
+  }
+  // 有 spans:按 \n 拆行,每行内按 span 片段渲染 <span style="...">
+  const result = [];
+  let pos = 0;
+  for (let lineIdx = 0; ; lineIdx++) {
+    const nlIdx = text.indexOf('\n', pos);
+    const lineEnd = nlIdx === -1 ? text.length : nlIdx;
+    if (lineIdx > 0) result.push('<br>');
+    // 渲染该行的 spans
+    let linePos = 0;
+    for (const sp of spans) {
+      const spStart = linePos;
+      const spEnd = linePos + sp.text.length;
+      if (spEnd <= pos || spStart >= lineEnd) { linePos = spEnd; continue; }
+      const clipStart = Math.max(spStart, pos) - spStart;
+      const clipEnd = Math.min(spEnd, lineEnd) - spStart;
+      const segment = sp.text.slice(clipStart, clipEnd);
+      if (segment) {
+        const style = spanStyle(sp);
+        if (style) result.push(`<span style="${style}">${escapeHtml(segment)}</span>`);
+        else result.push(escapeHtml(segment));
+      }
+      linePos = spEnd;
+    }
+    if (nlIdx === -1) break;
+    pos = nlIdx + 1;
+  }
+  return result.join('');
+}
+
+/** 从 contenteditable DOM 重建 spans 数组(沿祖先收集有效样式) */
+export function spansFromDom(textEl) {
+  const spans = [];
+  let hasStyle = false;
+  // 沿祖先链汇总某文本节点上的生效样式
+  const effectiveStyle = (el) => {
+    const sp = { color: null, b: false, i: false, u: false, s: false, hl: null };
+    let node = el;
+    while (node && node !== textEl) {
+      const name = node.nodeName;
+      const st = node.style;
+      if (name === 'B' || name === 'STRONG' || name === 'SPAN') {
+        const fw = st ? st.fontWeight : null;
+        if (name === 'B' || name === 'STRONG' || fw === 'bold' || (fw && parseInt(fw, 10) >= 600)) sp.b = true;
+        if (st && st.color) sp.color = st.color;
+        if (st && st.fontStyle === 'italic') sp.i = true;
+        if (st && /underline/.test(st.textDecoration)) sp.u = true;
+        if (st && /line-through/.test(st.textDecoration)) sp.s = true;
+        if (st && /^#/.test(st.backgroundColor)) sp.hl = st.backgroundColor;
+      } else if (name === 'I' || name === 'EM') {
+        sp.i = true;
+      } else if (name === 'U') {
+        sp.u = true;
+      } else if (name === 'S' || name === 'STRIKE' || name === 'DEL') {
+        sp.s = true;
+      } else if (name === 'MARK') {
+        sp.hl = '#ffff00';
+      } else if (name === 'FONT') {
+        // 某些浏览器 execCommand('foreColor') 产出 <font color>,需兜底识别
+        const fc = node.getAttribute?.('color');
+        if (fc && /^#/.test(fc)) sp.color = fc;
+      }
+      node = node.parentElement;
+    }
+    return sp;
+  };
+  const walk = (n) => {
+    if (n.nodeType === Node.TEXT_NODE) {
+      if (n.textContent) {
+        const st = effectiveStyle(n.parentElement);
+        if (spanStyled(st)) hasStyle = true;
+        spans.push(copySpan(st, n.textContent));
+      }
+    } else if (n.nodeName === 'BR') {
+      spans.push({ text: '\n', color: null });
+    } else if (n.nodeName === 'DIV') {
+      // contenteditable 换行可能生成 DIV,保留结构
+      if (spans.length > 0) spans.push({ text: '\n', color: null });
+      n.childNodes.forEach(walk);
+    } else {
+      n.childNodes.forEach(walk);
+    }
+  };
+  walk(textEl);
+  return hasStyle && spans.length > 0 ? spans : null;
+}
+
+/** 提取 contenteditable 纯文本(<br>/<div> 转 \n,span 取文本) */
+export function contentText(textEl) {
+  let out = '';
+  const walk = (n) => {
+    if (n.nodeType === Node.TEXT_NODE) out += n.textContent;
+    else if (n.nodeName === 'BR') out += '\n';
+    else if (n.nodeName === 'DIV') out += (out && !out.endsWith('\n') ? '\n' : '');
+    n.childNodes.forEach(walk);
+  };
+  textEl.childNodes.forEach(walk);
+  return out;
+}
+
+/** 计算 (node, offset) 在元素内的字符偏移(文本节点长度 + <br>=1,与 contentText 对齐;不依赖 Range.toString) */
+export function charOffsetIn(el, node, offset) {
+  let count = 0, found = false;
+  const walk = (n) => {
+    if (found) return;
+    if (n.nodeType === Node.TEXT_NODE) {
+      if (n === node) { count += offset; found = true; return; }
+      count += n.textContent.length;
+    } else if (n.nodeName === 'BR') {
+      if (n === node) { count += offset || 0; found = true; return; }
+      count += 1;
+    } else if (n.nodeType === Node.ELEMENT_NODE && n === node) {
+      // 元素边界:偏移为该元素前 offset 个子节点的字符总数
+      for (let i = 0; i < offset && i < n.childNodes.length; i++) walk(n.childNodes[i]);
+      found = true;
+      return;
+    } else {
+      for (const c of n.childNodes) walk(c);
+    }
+  };
+  walk(el);
+  return count;
+}

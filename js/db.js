@@ -38,6 +38,7 @@ export function createDoc(title = '未命名文档') {
     title,
     layout: 'right',
     theme: null,
+    bg: null,
     createdAt: now,
     updatedAt: now,
     root: createNode(title, now),

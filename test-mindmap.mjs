@@ -685,5 +685,183 @@ console.log('--- Mindmap 径向布局子树角度不重叠 ---');
   assert(!overlap, '径向布局相邻子树角度扇区不重叠');
 }
 
+console.log('--- Mindmap 富文本编辑(contenteditable + spans 提交) ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = '根';
+  const container = document.createElement('div');
+  let changed = 0;
+  const mm = new Mindmap(container, doc, () => { changed++; });
+  mm.render();
+  mm._startEdit(doc.root);
+
+  const editEl = container.querySelector('.mm-edit');
+  assert(editEl !== null, '进入编辑态生成 .mm-edit 元素');
+  assert(editEl.getAttribute('contenteditable') === 'true', '.mm-edit 为 contenteditable');
+  assert(editEl.textContent === '根', '编辑框内容为节点文本');
+
+  editEl.innerHTML = '<span style="color:#c0392b;font-weight:bold">红粗</span>';
+  editEl.dispatchEvent(new window.Event('input', { bubbles: true }));
+  assert(mm._editingDraft === editEl.innerHTML, 'input 事件同步 _editingDraft(innerHTML)');
+
+  editEl.dispatchEvent(new window.Event('blur'));
+  assert(doc.root.text === '红粗', '提交后节点文本更新, got ' + doc.root.text);
+  assert(Array.isArray(doc.root.spans) && doc.root.spans[0].color === '#c0392b' && doc.root.spans[0].b === true, '提交保存逐字 spans');
+  assert(mm.editingId === null, '提交后退出编辑态');
+
+  mm._startEdit(doc.root);
+  const el2 = container.querySelector('.mm-edit');
+  el2.innerHTML = '两行<br>文本';
+  el2.dispatchEvent(new window.Event('input', { bubbles: true }));
+  el2.dispatchEvent(new window.Event('blur'));
+  assert(doc.root.text === '两行\n文本', 'Shift+Enter 产生的 <br> 转 \n 存模型, got ' + JSON.stringify(doc.root.text));
+  assert(doc.root.spans === null, '无样式多行文本 spans 为 null');
+}
+
+console.log('--- Mindmap 画布背景 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = '根';
+  const container = document.createElement('div');
+  const mm = new Mindmap(container, doc, () => {});
+  doc.bg = '#ffeeee';
+  mm.render();
+  assert(container.style.background === '#ffeeee', 'doc.bg 渲染为容器背景, got ' + container.style.background);
+  doc.bg = null;
+  doc.theme = 'ocean';
+  mm.render();
+  assert(container.style.background === '#eef4fb', '无 bg 时回退主题底色, got ' + container.style.background);
+}
+
+console.log('--- Mindmap 编辑态选区着色 applySelectionColor ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = '加粗普通';
+  const container = document.createElement('div');
+  let changed = 0;
+  const mm = new Mindmap(container, doc, () => { changed++; });
+  mm.render();
+  mm._startEdit(doc.root);
+  const editEl = container.querySelector('.mm-edit');
+  assert(editEl.dataset.id === doc.root.id, '.mm-edit 带 data-id');
+
+  // 编辑框内容:前半加粗(b 标签),后半普通
+  editEl.innerHTML = '<b>加粗</b>普通';
+  editEl.dispatchEvent(new window.Event('input', { bubbles: true }));
+
+  // linkedom 的 Range 不完整,用可计算文本偏移的 mock 顶替
+  const origCreateRange = document.createRange;
+  document.createRange = () => {
+    const pre = { el: null, node: null, off: 0 };
+    pre.selectNodeContents = (el) => { pre.el = el; };
+    pre.setEnd = (node, off) => { pre.node = node; pre.off = off; };
+    pre.toString = () => {
+      if (!pre.el) return '';
+      let cur = '';
+      const walk = (n) => {
+        if (n.nodeType === Node.TEXT_NODE) {
+          if (n === pre.node) { cur += n.textContent.slice(0, pre.off); return true; }
+          cur += n.textContent;
+          return false;
+        }
+        if (n.nodeName === 'BR') { cur += '\n'; return false; }
+        for (const c of n.childNodes) if (walk(c)) return true;
+        return false;
+      };
+      walk(pre.el);
+      return cur;
+    };
+    return pre;
+  };
+  // 选中「粗普」(第 2-3 个字符)
+  const range = {
+    startContainer: editEl.firstChild.firstChild,
+    startOffset: 1,
+    toString: () => '粗普',
+  };
+  mm.applySelectionColor('#c0392b', range, editEl);
+  document.createRange = origCreateRange;
+
+  const spans = doc.root.spans;
+  assert(Array.isArray(spans), '选中上色后生成 spans');
+  assert(spans.map((s) => s.text).join('') === '加粗普通', 'spans 文本拼接一致, got ' + spans.map((s) => s.text).join(''));
+  assert(spans[0].b === true && spans[0].color === null, '未选中的「加」保留加粗');
+  assert(spans[1].text === '粗' && spans[1].b === true && spans[1].color === '#c0392b', '「粗」着色且保留加粗');
+  assert(spans[2].text === '普' && spans[2].color === '#c0392b', '「普」着色');
+  assert(spans[3].text === '通' && spans[3].color === null, '未选中的「通」不着色');
+  assert(mm._editingDraft.includes('#c0392b'), '编辑框 draft 更新为着色 HTML');
+  assert(changed > 0, '触发 onChange 持久化');
+}
+
+console.log('--- Mindmap 选区着色(charStart/charEnd 主路径,不依赖 Range) ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = '加粗普通';
+  const container = document.createElement('div');
+  let changed = 0;
+  const mm = new Mindmap(container, doc, () => { changed++; });
+  mm.render();
+  mm._startEdit(doc.root);
+  const editEl = container.querySelector('.mm-edit');
+  editEl.innerHTML = '<b>加粗</b>普通';
+  editEl.dispatchEvent(new window.Event('input', { bubbles: true }));
+
+  // 真实路径:anchor/focus 算出的字符偏移(1-3 = 「粗普」),不经过 Range
+  mm.applySelectionColor('#c0392b', null, editEl, 1, 3);
+
+  const spans = doc.root.spans;
+  assert(Array.isArray(spans), '字符偏移路径生成 spans');
+  assert(spans[0].text === '加' && spans[0].b === true && spans[0].color === null, '「加」保留加粗不着色');
+  assert(spans[1].text === '粗' && spans[1].b === true && spans[1].color === '#c0392b', '「粗」着色且保留加粗');
+  assert(spans[2].text === '普' && spans[2].color === '#c0392b', '「普」着色');
+  assert(spans[3].text === '通' && spans[3].color === null, '「通」不着色');
+}
+
+console.log('--- Mindmap 多行节点选区着色(char 偏移含 <br>) ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = '两行\n文本';
+  const container = document.createElement('div');
+  const mm = new Mindmap(container, doc, () => {});
+  mm.render();
+  mm._startEdit(doc.root);
+  const editEl = container.querySelector('.mm-edit');
+  // 两行:行1 = 两行,<br>,行2 = 文本 → 字符:两行(2) \n(1) 文本(2),总 5
+  editEl.innerHTML = '两行<br>文本';
+  editEl.dispatchEvent(new window.Event('input', { bubbles: true }));
+
+  // 选中第二行「文本」(偏移 3-5)
+  mm.applySelectionColor('#4f8cf0', null, editEl, 3, 5);
+
+  const spans = doc.root.spans;
+  assert(Array.isArray(spans), '多行选区生成 spans');
+  assert(spans.map((s) => s.text).join('') === '两行\n文本', '多行文本拼接一致, got ' + spans.map((s) => s.text).join(''));
+  assert(spans[0].text === '两行\n' && spans[0].color === null, '第一行+换行不着色, got ' + JSON.stringify(spans[0].text));
+  assert(spans[1].text === '文本' && spans[1].color === '#4f8cf0', '第二行着色');
+}
+
+console.log('--- Mindmap 非编辑态 applySelectionColor 触发重绘 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = '你好世界';
+  const container = document.createElement('div');
+  const mm = new Mindmap(container, doc, () => {});
+  mm.render();
+  // 模拟残留选区:已 detach 的 .mm-edit(编辑提交后 render 会移除旧编辑框)
+  const detached = document.createElement('div');
+  detached.className = 'mm-edit';
+  detached.dataset.id = doc.root.id;
+  detached.innerHTML = '你好世界';
+  assert(detached.isConnected === false, 'detached 元素 isConnected 为 false');
+  assert(mm.editingId === null, '当前非编辑态');
+  mm.applySelectionColor('#c0392b', null, detached, 2, 4);
+  // 非编辑态:应触发 render,画布立即出现带色的 tspan
+  const nodeG = container.querySelector('.mm-node[data-id="' + doc.root.id + '"]');
+  const ts = nodeG.querySelectorAll('tspan');
+  assert(ts.length === 2, '局部上色后生成 2 个 tspan, got ' + ts.length);
+  assert(ts[1].getAttribute('fill') === '#c0392b', '第二段 tspan 立即带色, got ' + ts[1].getAttribute('fill'));
+  assert(ts[0].getAttribute('fill') !== '#c0392b', '第一段不变色');
+}
+
 console.log(`\n=== Mindmap 测试: ${pass} passed, ${fail} failed ===`);
 process.exit(fail ? 1 : 0);

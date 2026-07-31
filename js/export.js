@@ -94,6 +94,7 @@ export function validateDoc(input) {
     title: typeof input.title === 'string' ? input.title : (input.title == null ? '未命名文档' : String(input.title)),
     layout: LAYOUTS.includes(input.layout) ? input.layout : 'right',
     theme: (typeof input.theme === 'string' && input.theme) ? input.theme : null,
+    bg: (typeof input.bg === 'string' && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(input.bg)) ? input.bg : null,
     createdAt: typeof input.createdAt === 'number' ? input.createdAt : Date.now(),
     updatedAt: typeof input.updatedAt === 'number' ? input.updatedAt : Date.now(),
     root: normalizeNode(input.root),
@@ -225,7 +226,7 @@ function serializeSVG(svgEl) {
 }
 
 /** 导出 PNG(从思维导图 SVG 转换,2x 清晰度) */
-export async function exportPNG(svgEl, title) {
+export async function exportPNG(svgEl, title, bgColor = '#ffffff') {
   const svgStr = serializeSVG(svgEl);
   const img = new Image();
   const svgBlob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
@@ -242,7 +243,7 @@ export async function exportPNG(svgEl, title) {
   canvas.width = w * scale;
   canvas.height = h * scale;
   const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = bgColor;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
   URL.revokeObjectURL(url);

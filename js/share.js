@@ -12,6 +12,7 @@ export async function encodeShare(doc) {
     t: doc.title,
     l: (doc.layout && doc.layout !== 'right') ? doc.layout : undefined,
     m: doc.theme || undefined,
+    b: doc.bg || undefined,
     r: trimNode(doc.root),
   };
   const json = JSON.stringify(slim);
@@ -54,6 +55,7 @@ export async function decodeShare(hash) {
     title: slim.t || '分享文档',
     layout: LAYOUTS.includes(slim.l) ? slim.l : 'right',
     theme: (typeof slim.m === 'string' && slim.m) ? slim.m : null,
+    bg: (typeof slim.b === 'string' && /^#([0-9a-fA-F]{6})$/.test(slim.b)) ? slim.b : null,
     createdAt: Date.now(),
     updatedAt: Date.now(),
     root: restoreNode(slim.r),
