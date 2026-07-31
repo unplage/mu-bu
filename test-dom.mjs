@@ -238,6 +238,173 @@ console.log('--- Outliner collapseAll / expandAll ---');
   assert(container.querySelectorAll('.outline-row').length === 4, 'expandAll: 全部4可见');
 }
 
+console.log('--- Outliner 富文本 spans 渲染 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = 'Hello';
+  doc.root.spans = [
+    { text: 'He', color: null, b: true },
+    { text: 'll', i: true },
+    { text: 'o', u: true, s: true, hl: '#ffff00' },
+  ];
+  const container = document.createElement('div');
+  const outliner = new Outliner(container, doc, () => {});
+  outliner.render();
+  const textEl = container.querySelector('.node-text[data-id="' + doc.root.id + '"]');
+  const html = textEl.innerHTML;
+  assert(html.includes('font-weight:bold'), '加粗渲染');
+  assert(html.includes('font-style:italic'), '斜体渲染');
+  assert(html.includes('underline') && html.includes('line-through'), '下划线+删除线渲染');
+  assert(html.includes('background:#ffff00'), '高亮渲染');
+}
+
+console.log('--- Outliner 富文本 input 重建 spans ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = 'ab';
+  const container = document.createElement('div');
+  const outliner = new Outliner(container, doc, () => {});
+  outliner.render();
+  const textEl = container.querySelector('.node-text[data-id="' + doc.root.id + '"]');
+  textEl.innerHTML = '<span style="font-weight:bold">a</span><span style="font-style:italic;text-decoration:underline line-through">b</span>';
+  textEl.dispatchEvent(new window.Event('input'));
+  const spans = doc.root.spans;
+  assert(Array.isArray(spans) && spans.length === 2, 'spans 重建 2 段, got ' + (spans && spans.length));
+  assert(spans[0].b === true, '第一段加粗');
+  assert(spans[1].i === true && spans[1].u === true && spans[1].s === true, '第二段斜体+下划线+删除线');
+  assert(doc.root.text === 'ab', 'text 保持 ab');
+}
+
+console.log('--- Outliner 待办复选框 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = 'root';
+  doc.root.children.push(createNode('a'));
+  doc.root.children[0].checked = true;
+  const container = document.createElement('div');
+  const outliner = new Outliner(container, doc, () => {});
+  outliner.render();
+  const aId = doc.root.children[0].id;
+  const cb = container.querySelector('.node-check[data-id="' + aId + '"]');
+  assert(cb !== null && cb.classList.contains('checked'), '勾选节点渲染选中复选框');
+  // 点击取消勾选
+  cb.dispatchEvent(new window.Event('click'));
+  assert(doc.root.children[0].checked === null, '点击后 checked 置空(移除待办)');
+  // 未勾选时复选框淡显(ghost),点击仍可重新勾选
+  const cb2 = container.querySelector('.node-check[data-id="' + aId + '"]');
+  assert(cb2 !== null && cb2.classList.contains('ghost') && !cb2.classList.contains('checked'), '取消勾选后复选框淡显');
+  cb2.dispatchEvent(new window.Event('click'));
+  assert(doc.root.children[0].checked === true, '再点恢复勾选');
+}
+
+console.log('--- Outliner 标签 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = 'root';
+  doc.root.children.push(createNode('a'));
+  doc.root.children[0].tags = ['重要'];
+  const aId = doc.root.children[0].id;
+  const container = document.createElement('div');
+  const outliner = new Outliner(container, doc, () => {});
+  outliner.render();
+  assert(container.querySelector('.node-tag[data-tag="重要"]') !== null, '标签 chip 渲染');
+  // 通过 blur 添加标签(精确到节点 a 的输入框)
+  const input = container.querySelector('.node-tag-input[data-id="' + aId + '"]');
+  input.value = '#新标签 重要';
+  input.dispatchEvent(new window.Event('blur'));
+  assert(doc.root.children[0].tags.includes('新标签'), 'blur 添加新标签');
+  assert(doc.root.children[0].tags.filter((t) => t === '重要').length === 1, '重复标签去重');
+  // 移除标签
+  const x = container.querySelector('.node-tag-x[data-tag="重要"]');
+  x.dispatchEvent(new window.Event('click'));
+  assert(!doc.root.children[0].tags.includes('重要'), '点击 × 移除标签');
+}
+
+console.log('--- Outliner 复制/粘贴 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = 'root';
+  doc.root.children.push(createNode('a'));
+  doc.root.children[0].children.push(createNode('a1'));
+  const aId = doc.root.children[0].id;
+  const container = document.createElement('div');
+  const outliner = new Outliner(container, doc, () => {});
+  outliner.render();
+  outliner.selectedId = aId;
+  assert(outliner.copySelected() === true, 'copySelected 成功');
+  const n0 = doc.root.children.length;
+  assert(outliner.pasteTo(aId) === true, 'pasteTo 成功');
+  assert(doc.root.children.length === n0 + 1, '粘贴后多一个兄弟');
+  const pasted = doc.root.children[doc.root.children.length - 1];
+  assert(pasted.id !== aId && pasted.children[0].id !== doc.root.children[0].children[0].id, '粘贴生成全新 id');
+  assert(pasted.text === 'a', '粘贴内容一致');
+}
+
+console.log('--- Outliner 多选与批量删除 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = 'root';
+  doc.root.children.push(createNode('a'));
+  doc.root.children.push(createNode('b'));
+  doc.root.children.push(createNode('c'));
+  const aId = doc.root.children[0].id;
+  const bId = doc.root.children[1].id;
+  const container = document.createElement('div');
+  const outliner = new Outliner(container, doc, () => {});
+  outliner.render();
+  outliner.setSelection(aId, {});
+  outliner.setSelection(bId, { additive: true });
+  const ids = outliner.getSelectedIds();
+  assert(ids.includes(aId) && ids.includes(bId), '多选包含 a,b');
+  outliner.deleteSelected();
+  assert(doc.root.children.length === 1, '批量删除后剩 1 个');
+  assert(doc.root.children[0].id === 'root' || doc.root.children.length === 1, '删除正确');
+}
+
+console.log('--- Outliner 整块移动 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = 'root';
+  doc.root.children.push(createNode('a'));
+  doc.root.children.push(createNode('b'));
+  doc.root.children.push(createNode('c'));
+  const aId = doc.root.children[0].id;
+  const bId = doc.root.children[1].id;
+  const cId = doc.root.children[2].id;
+  const container = document.createElement('div');
+  const outliner = new Outliner(container, doc, () => {});
+  outliner.render();
+  outliner.setSelection(aId, {});
+  outliner.setSelection(bId, { additive: true });
+  assert(outliner.moveSelectedBlock(1) === true, '整块下移成功');
+  assert(doc.root.children[0].id === cId, 'c 移到最前');
+  assert(doc.root.children[1].id === aId && doc.root.children[2].id === bId, 'a,b 下移');
+}
+
+console.log('--- Outliner 搜索与替换 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = 'root';
+  doc.root.children.push(createNode('你好世界'));
+  doc.root.children.push(createNode('世界很大'));
+  const c1 = doc.root.children[0].id;
+  const c2 = doc.root.children[1].id;
+  const container = document.createElement('div');
+  const outliner = new Outliner(container, doc, () => {});
+  outliner.render();
+  const count = outliner.setSearchQuery('世界');
+  assert(count === 2, '搜索到 2 处, got ' + count);
+  outliner.goToMatch(1);
+  assert(outliner.selectedId === c2, '定位到第二个匹配');
+  outliner.goToMatch(0);
+  assert(outliner.selectedId === c1, '定位到第一个匹配');
+  // 搜索高亮 mark 已渲染(替换前)
+  assert(container.querySelectorAll('mark.search-hit').length >= 1, '搜索高亮 mark 渲染');
+  const replaced = outliner.replaceAll('WORLD');
+  assert(replaced === 2, '全部替换 2 处, got ' + replaced);
+  assert(doc.root.children[0].text === '你好WORLD' && doc.root.children[1].text === 'WORLD很大', '替换结果正确');
+}
+
 console.log('--- Outliner 备注行 ---');
 {
   const doc = createDoc('T');

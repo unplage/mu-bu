@@ -81,6 +81,29 @@ input, textarea { font-family: inherit; }
 .node-note { font-size: 12px; color: var(--text-faint); padding: 0 6px 3px; border-radius: 3px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; outline: none; }
 .node-note:focus { color: var(--text-soft); }
 .node-note:empty::before { content: attr(data-placeholder); opacity: 0.6; pointer-events: none; }
+.node-check { flex-shrink: 0; width: 20px; height: 20px; margin-top: 2px; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--bg-elev); color: var(--primary); font-size: 13px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; user-select: none; }
+.node-check:hover { border-color: var(--primary); }
+.node-check.ghost { opacity: 0.35; }
+.node-check.checked { background: var(--primary); border-color: var(--primary); color: #fff; }
+.node-check.checked::before { content: "✓"; font-size: 12px; font-weight: bold; }
+.outline-row.is-checked .node-text { color: var(--text-faint); text-decoration: line-through; }
+.node-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 2px 6px; }
+.node-tag { display: inline-flex; align-items: center; gap: 4px; background: var(--primary-soft); color: var(--primary); font-size: 12px; padding: 1px 6px 1px 8px; border-radius: 10px; }
+.node-tag-x { border: none; background: none; color: inherit; cursor: pointer; font-size: 13px; padding: 0 2px; line-height: 1; }
+.node-tag-x:hover { color: var(--danger); }
+.node-tag-input { border: 1px dashed var(--border-strong); background: transparent; font-size: 12px; padding: 1px 6px; border-radius: 8px; width: 110px; color: var(--text-soft); outline: none; }
+.node-tag-input:focus { border-color: var(--primary); }
+.node-files { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 2px 6px; }
+.node-file-img { width: 120px; height: 80px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border); cursor: pointer; }
+.node-file-chip { display: inline-block; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; font-size: 12px; color: var(--text-soft); cursor: pointer; }
+.node-file-chip:hover { border-color: var(--primary); color: var(--primary); }
+.node-file-add { border: 1px dashed var(--border-strong); background: none; color: var(--text-faint); font-size: 12px; padding: 2px 10px; border-radius: 4px; cursor: pointer; }
+.node-file-add:hover { color: var(--primary); border-color: var(--primary); }
+.node-link-input { border: 1px dashed var(--border-strong); background: transparent; font-size: 12px; padding: 1px 6px; border-radius: 4px; width: 220px; color: var(--text-soft); outline: none; margin: 2px 6px; }
+.node-link-input:focus { border-color: var(--primary); }
+.node-link-chip { display: inline-block; font-size: 12px; color: var(--primary); padding: 0 6px 2px; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px; }
+.node-link-chip:hover { text-decoration: underline; }
+mark.search-hit { background: #ffe58a; color: inherit; border-radius: 2px; padding: 0 1px; }
 .outline-row.dragging { opacity: 0.4; }
 .outline-row.drop-before::before, .outline-row.drop-after::after { content: ""; position: absolute; left: 0; right: 0; height: 2px; background: var(--primary); border-radius: 1px; }
 .outline-row.drop-before::before { top: -1px; }
@@ -106,6 +129,35 @@ input, textarea { font-family: inherit; }
 .mm-btn { height: 30px; padding: 0 8px; border: none; background: transparent; border-radius: 4px; color: var(--text-soft); font-size: 12px; display: flex; align-items: center; justify-content: center; min-width: 32px; }
 .mm-btn:hover { background: var(--bg); color: var(--text); }
 .mm-divider { height: 1px; background: var(--border); margin: 2px 4px; }
+.ol-toolbar { position: absolute; top: 12px; right: 16px; z-index: 15; display: flex; align-items: center; gap: 3px; background: var(--bg-elev); padding: 4px 6px; border-radius: var(--radius); box-shadow: var(--shadow); border: 1px solid var(--border); }
+.ol-btn { height: 26px; min-width: 26px; padding: 0 7px; border: none; background: transparent; border-radius: 4px; color: var(--text-soft); font-size: 13px; cursor: pointer; }
+.ol-btn:hover { background: var(--bg); color: var(--text); }
+.ol-btn.active { background: var(--primary-soft); color: var(--primary); }
+.ol-searchbar { position: absolute; top: 54px; right: 16px; z-index: 15; display: flex; align-items: center; gap: 4px; background: var(--bg-elev); padding: 5px 8px; border-radius: var(--radius); box-shadow: var(--shadow); border: 1px solid var(--border); }
+.ol-searchbar input { border: 1px solid var(--border); border-radius: 4px; padding: 3px 7px; font-size: 12px; width: 130px; outline: none; }
+.ol-searchbar input:focus { border-color: var(--primary); }
+.ol-search-count { font-size: 11px; color: var(--text-faint); white-space: nowrap; }
+.ol-tagbar { position: absolute; top: 92px; right: 16px; z-index: 15; display: flex; flex-wrap: wrap; gap: 4px; max-width: 50%; }
+.ol-tag-item { font-size: 12px; background: var(--bg-elev); border: 1px solid var(--border); color: var(--text-soft); border-radius: 10px; padding: 1px 8px; cursor: pointer; }
+.ol-tag-item:hover { border-color: var(--primary); color: var(--primary); }
+.ol-tag-item.active { background: var(--primary-soft); border-color: var(--primary); color: var(--primary); }
+.ol-focusbar { position: sticky; top: 0; z-index: 12; display: flex; align-items: center; gap: 8px; background: var(--primary-soft); padding: 6px 16px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.ol-focustitle { color: var(--primary); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ol-status { position: sticky; bottom: 0; z-index: 12; background: var(--bg-elev); border-top: 1px solid var(--border); padding: 4px 16px; font-size: 12px; color: var(--text-faint); }
+.toc-panel { position: absolute; top: 0; left: 0; bottom: 0; width: 260px; background: var(--bg-elev); border-right: 1px solid var(--border); z-index: 18; padding: 12px; overflow: hidden; display: flex; flex-direction: column; box-shadow: var(--shadow-lg); }
+.toc-list { flex: 1; overflow-y: auto; font-size: 13px; }
+.toc-item { padding: 3px 6px; border-radius: 4px; cursor: pointer; color: var(--text-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.toc-item:hover { background: var(--bg); color: var(--text); }
+.toc-item.active { background: var(--primary-soft); color: var(--primary); }
+.present-modal { position: fixed; inset: 0; z-index: 500; background: #f7f8fa; display: flex; flex-direction: column; }
+.present-modal[hidden] { display: none; }
+.present-content { flex: 1; overflow-y: auto; padding: 8vh 10vw; font-size: 18px; line-height: 1.8; }
+.present-content .p-node { margin: 6px 0; padding: 6px 12px; border-radius: 8px; }
+.present-content .p-node.cur { background: var(--primary-soft); border: 1px solid var(--primary); }
+.present-content .p-node.lvl0 { font-size: 26px; font-weight: 700; }
+.present-content .p-node.lvl1 { font-size: 20px; font-weight: 600; }
+.present-content .p-note { font-size: 14px; color: var(--text-faint); margin-left: 12px; white-space: pre-wrap; }
+.present-nav { display: flex; justify-content: center; gap: 12px; padding: 14px; border-top: 1px solid var(--border); background: var(--bg-elev); }
 .mm-hint { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); background: rgba(43,51,59,0.85); color: #fff; padding: 6px 14px; border-radius: 16px; font-size: 11px; z-index: 20; pointer-events: none; backdrop-filter: blur(4px); max-width: 90vw; text-align: center; }
 .mm-status { position: absolute; bottom: 16px; left: 16px; background: var(--bg-elev); padding: 6px 12px; border-radius: var(--radius); box-shadow: var(--shadow); border: 1px solid var(--border); font-size: 12px; color: var(--text-soft); z-index: 20; }
 .font-size-grid { display: flex; flex-direction: column; gap: 4px; }
@@ -116,6 +168,11 @@ input, textarea { font-family: inherit; }
 .mm-node-rect { transition: fill 0.15s, stroke 0.15s; }
 .mm-node-text { pointer-events: none; user-select: none; }
 .mm-edge { fill: none; stroke-width: 1.5; }
+.mm-node.is-dragging { opacity: 0.35; }
+.mm-node.mm-drop-child .mm-node-rect { stroke: #4f8cf0 !important; stroke-width: 3 !important; }
+.mm-node.mm-drop-before .mm-node-rect { stroke: #5cb85c !important; stroke-width: 3 !important; stroke-dasharray: 4 2; }
+.mm-node.mm-drop-after .mm-node-rect { stroke: #f0a04b !important; stroke-width: 3 !important; stroke-dasharray: 4 2; }
+.mm-node-img { pointer-events: none; }
 .mm-edit { border: 2px solid #4f8cf0; border-radius: 4px; padding: 2px 6px; outline: none; font-family: inherit; background: #fff; }
 .mm-ctx-menu { position: fixed; z-index: 300; background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 4px; min-width: 150px; }
 .mm-ctx-item { display: block; width: 100%; text-align: left; padding: 7px 10px; border: none; background: none; font-size: 13px; color: var(--text); border-radius: var(--radius-sm); cursor: pointer; }
@@ -216,6 +273,36 @@ input, textarea { font-family: inherit; }
     </header>
 
     <section id="outlineView" class="view view-outline">
+      <div id="focusBar" class="ol-focusbar" hidden>
+        <button id="focusBack" class="ol-btn" title="返回全文档">← 全文档</button>
+        <span id="focusTitle" class="ol-focustitle"></span>
+      </div>
+      <div id="olStatus" class="ol-status"></div>
+      <div id="olToolbar" class="ol-toolbar">
+        <button id="fmtBold" class="ol-btn" title="加粗 (Ctrl+B)"><b>B</b></button>
+        <button id="fmtItalic" class="ol-btn" title="斜体 (Ctrl+I)"><i>I</i></button>
+        <button id="fmtUnderline" class="ol-btn" title="下划线 (Ctrl+U)"><u>U</u></button>
+        <button id="fmtStrike" class="ol-btn" title="删除线"><s>S</s></button>
+        <button id="fmtHighlight" class="ol-btn" title="高亮" style="background:#ffe58a">H</button>
+        <div class="toolbar-divider"></div>
+        <button id="sortBtn" class="ol-btn" title="排序同级">⇅ 排序</button>
+        <button id="focusBtn" class="ol-btn" title="聚焦当前节点">◎ 聚焦</button>
+        <button id="presentBtn" class="ol-btn" title="放映演示">▶ 放映</button>
+        <div class="toolbar-divider"></div>
+        <button id="searchToggle" class="ol-btn" title="搜索/替换 (Ctrl+F)">🔍</button>
+        <button id="tocBtn" class="ol-btn" title="文档目录">☷</button>
+      </div>
+      <div id="searchBar" class="ol-searchbar" hidden>
+        <input id="searchInput" type="text" placeholder="搜索节点内容…" />
+        <button id="searchPrev" class="ol-btn" title="上一个 (Shift+Enter)">↑</button>
+        <button id="searchNext" class="ol-btn" title="下一个 (Enter)">↓</button>
+        <span id="searchCount" class="ol-search-count"></span>
+        <input id="searchReplace" type="text" placeholder="替换为…" />
+        <button id="searchReplaceOne" class="ol-btn" title="替换当前">替换</button>
+        <button id="searchReplaceAll" class="ol-btn" title="全部替换">全部</button>
+        <button id="searchClose" class="ol-btn" title="关闭">✕</button>
+      </div>
+      <div id="tagBar" class="ol-tagbar" hidden></div>
       <div id="outlineTree" class="outline-tree" tabindex="0"></div>
     </section>
 
@@ -286,6 +373,36 @@ input, textarea { font-family: inherit; }
   <button class="layout-item" data-layout="down">向下树图</button>
   <button class="layout-item" data-layout="radial">径向辐射</button>
   <button class="layout-item" data-layout="leftright">左右交错</button>
+  <div class="popover-title" style="margin-top:10px">主题</div>
+  <button class="layout-item" data-theme="">默认</button>
+  <button class="layout-item" data-theme="ocean">海洋</button>
+  <button class="layout-item" data-theme="forest">森林</button>
+  <button class="layout-item" data-theme="sunset">日落</button>
+  <button class="layout-item" data-theme="mono">极简</button>
+</div>
+
+<div id="sortPopover" class="popover" hidden>
+  <div class="popover-title">排序(选中节点的同级)</div>
+  <button class="layout-item" data-sort="name:1">名称 ↑</button>
+  <button class="layout-item" data-sort="name:-1">名称 ↓</button>
+  <button class="layout-item" data-sort="time:1">创建时间 ↑</button>
+  <button class="layout-item" data-sort="time:-1">创建时间 ↓</button>
+  <button class="layout-item" data-sort="length:1">字数 ↑</button>
+  <button class="layout-item" data-sort="length:-1">字数 ↓</button>
+</div>
+
+<div id="tocPanel" class="toc-panel" hidden>
+  <div class="popover-title">文档目录 <button id="tocClose" class="ol-btn" style="float:right">✕</button></div>
+  <div id="tocList" class="toc-list"></div>
+</div>
+
+<div id="presentModal" class="present-modal" hidden>
+  <div class="present-content" id="presentContent"></div>
+  <div class="present-nav">
+    <button id="presentPrev" class="btn">← 上一条</button>
+    <button id="presentExit" class="btn">退出 (Esc)</button>
+    <button id="presentNext" class="btn">下一条 →</button>
+  </div>
 </div>
 
 <div id="exportModal" class="modal" hidden>

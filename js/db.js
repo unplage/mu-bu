@@ -37,25 +37,15 @@ export function createDoc(title = '未命名文档') {
     id: uid('doc'),
     title,
     layout: 'right',
+    theme: null,
     createdAt: now,
     updatedAt: now,
-    root: {
-      id: uid('n'),
-      text: title,
-      note: '',
-      color: null,
-      fontColor: null,
-      spans: null,
-      collapsed: false,
-      children: [],
-      fontSize: 'M',
-      side: 0,
-    },
+    root: createNode(title, now),
   };
 }
 
-/** 创建空白节点 */
-export function createNode(text = '') {
+/** 创建空白节点(含全部扩展字段,旧文档缺失时由读取点兜底) */
+export function createNode(text = '', createdAt = Date.now()) {
   return {
     id: uid('n'),
     text,
@@ -67,6 +57,11 @@ export function createNode(text = '') {
     children: [],
     fontSize: 'M',
     side: 0,
+    createdAt,
+    checked: null,
+    tags: [],
+    files: null,
+    link: null,
   };
 }
 

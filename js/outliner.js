@@ -1,8 +1,10 @@
 // outliner.js — 大纲视图渲染与编辑(虚拟化渲染:只渲染可视窗口内的行)
 import { el, escapeHtml, colorCss } from './utils.js';
 import { createNode } from './db.js';
+import * as Clipboard from './clipboard.js';
 import {
   flattenVisible, findNode, insertAfter, removeNode, indent, outdent, moveNode, contains,
+  removeNodesByIds, groupIndicesByParent, moveBlock, collectTopmost,
 } from './tree.js';
 
 const DEFAULT_ROW_H = 30;   // 未测量前的行高估算(px)
@@ -15,13 +17,74 @@ export class Outliner {
     this.doc = doc;
     this.onChange = onChange; // (doc, persist) => void
     this.selectedId = doc.root.id;
+    this._selectedExtra = new Set(); // 多选附加集合(不含主节点)
+    this._anchorId = doc.root.id;    // 范围选择的锚点
     this._focusId = null;
     this._focusOffset = null;
     this._heights = new Map(); // id -> 行高 px
     this._flat = null;         // 最近一次 render 的可见节点序列
+    this._searchQuery = '';    // 搜索高亮(只影响显示,不落模型)
+    this._searchMatchIds = null;
+    this._searchIndex = -1;
     this._scrollRaf = 0;
     this._scrollBound = () => this._scheduleWindow();
     this._attach();
+  }
+
+  /** 是否选中(主节点 + 多选附加) */
+  isSelected(id) {
+    return id === this.selectedId || this._selectedExtra.has(id);
+  }
+
+  /** 全部选中 id(主节点在前) */
+  getSelectedIds() {
+    return [this.selectedId, ...this._selectedExtra];
+  }
+
+  /**
+   * 设置选中。opts: additive=Ctrl 追加/切换, range=Shift 范围选择。
+   * 返回变化后的选中集 id 列表。
+   */
+  setSelection(id, { additive = false, range = false } = {}) {
+    if (range && this._flat) {
+      const flat = this._flat;
+      const ai = flat.findIndex((x) => x.node.id === this._anchorId);
+      const bi = flat.findIndex((x) => x.node.id === id);
+      if (ai >= 0 && bi >= 0) {
+        const [a, b] = [Math.min(ai, bi), Math.max(ai, bi)];
+        this._selectedExtra = new Set(flat.slice(a, b + 1).map((x) => x.node.id));
+        this._selectedExtra.delete(id);
+        this.selectedId = id;
+        return this.getSelectedIds();
+      }
+    }
+    if (additive) {
+      if (id === this.selectedId || this._selectedExtra.has(id)) {
+        // 取消选中
+        if (id === this.selectedId) {
+          const arr = [...this._selectedExtra];
+          this._selectedExtra.clear();
+          if (arr.length) {
+            this.selectedId = arr[arr.length - 1];
+            arr.pop();
+            arr.forEach((x) => this._selectedExtra.add(x));
+          }
+        } else {
+          this._selectedExtra.delete(id);
+        }
+      } else {
+        this._selectedExtra.add(id);
+      }
+    } else {
+      this._selectedExtra.clear();
+      this.selectedId = id;
+    }
+    this._anchorId = id;
+    return this.getSelectedIds();
+  }
+
+  clearExtraSelection() {
+    this._selectedExtra.clear();
   }
 
   setDoc(doc) {
@@ -48,11 +111,15 @@ export class Outliner {
       const id = row.dataset.id;
       if (e.target.closest('.bullet')) {
         this._toggleCollapse(id);
-      } else if (this.selectedId !== id) {
-        this._saveFocus();
-        this.selectedId = id;
-        this.render();
+        return;
       }
+      // 复选框/标签×/文件等已有自己的点击处理并 stopPropagation
+      if (e.target.closest('.node-check, .node-tag-x, .node-file-img, .node-file-chip, .node-link-chip, .node-tag-input, .node-link-input, .node-file-add')) return;
+      const additive = e.ctrlKey || e.metaKey;
+      const range = e.shiftKey;
+      this._saveFocus();
+      this.setSelection(id, { additive, range });
+      this.render();
     });
     // 拖拽
     this.container.addEventListener('dragstart', (e) => this._onDragStart(e));
@@ -63,8 +130,42 @@ export class Outliner {
   }
 
   // ---------- 渲染 ----------
+  /** 聚焦模式:只渲染该子树(viewRoot=null 回到全文档) */
+  setViewRoot(root) {
+    this._viewRoot = root || null;
+    this.render();
+  }
+
+  /** 标签过滤:只显示带该标签的节点(null 清除) */
+  setTagFilter(tag) {
+    this._tagFilter = tag || null;
+    this.render();
+  }
+
+  /** 定位并选中某节点(滚动到视口,不抢光标) */
+  revealNode(id) {
+    this.setSelection(id, {});
+    if (!this._flat) this.render();
+    const sp = this._scrollParent();
+    const i = this._flat.findIndex((x) => x.node.id === id);
+    if (i >= 0) {
+      let top = 0;
+      for (let j = 0; j < i; j++) top += this._heights.get(this._flat[j].node.id) || DEFAULT_ROW_H;
+      const vh = sp.clientHeight || 0;
+      if (top < (sp.scrollTop || 0) || top > (sp.scrollTop || 0) + vh - 40) {
+        sp.scrollTop = Math.max(0, top - 40);
+      }
+    }
+    this.render();
+  }
+
   render() {
-    this._flat = flattenVisible(this.doc.root);
+    const root = this._viewRoot || this.doc.root;
+    let flat = flattenVisible(root);
+    if (this._tagFilter) {
+      flat = flat.filter((x) => (x.node.tags || []).includes(this._tagFilter));
+    }
+    this._flat = flat;
     if (this._vtEnabled()) {
       this._renderWindow();
     } else {
@@ -123,13 +224,24 @@ export class Outliner {
     }
     if (spacerBottom > 0) frag.append(el('div', { class: 'vt-spacer', style: { height: spacerBottom + 'px' } }));
     this.container.replaceChildren(frag);
+    // 搜索高亮(显示层,不落模型)
+    if (this._searchQuery && this._searchMatchIds) {
+      for (const el of this.container.querySelectorAll('.node-text')) {
+        highlightSearchMatches(el, this._searchQuery);
+      }
+    }
     if (this._focusId) this._restoreFocus();
+  }
+
+  /** 通知(由 app 注入 toast) */
+  notify(msg) {
+    if (this._toast) this._toast(msg);
   }
 
   _renderNode(node, depth) {
     const hasChildren = node.children && node.children.length > 0;
     const isCollapsed = node.collapsed;
-    const selected = node.id === this.selectedId;
+    const selected = this.isSelected(node.id);
 
     const bullet = el('div', {
       class: 'bullet' + (hasChildren ? ' has-children' : ' empty') + (isCollapsed ? ' collapsed' : ''),
@@ -175,16 +287,152 @@ export class Outliner {
       });
       contentKids.push(note);
     }
+    // 标签行:有标签或选中时显示(可编辑 #标签)
+    if ((node.tags && node.tags.length) || selected) {
+      const tagsRow = el('div', { class: 'node-tags' });
+      (node.tags || []).forEach((t) => {
+        const chip = el('span', { class: 'node-tag', dataset: { tag: t } }, [
+          '#' + t,
+          el('button', { class: 'node-tag-x', dataset: { tag: t }, title: '移除标签' }, '×'),
+        ]);
+        chip.querySelector('.node-tag-x').addEventListener('click', (e) => {
+          e.stopPropagation();
+          const f = findNode(this.doc.root, node.id);
+          if (!f) return;
+          f.node.tags = (f.node.tags || []).filter((x) => x !== t);
+          this._saveFocus();
+          this.render();
+          this._emitChange(true);
+        });
+        tagsRow.append(chip);
+      });
+      const tagInput = el('input', { class: 'node-tag-input', dataset: { id: node.id }, placeholder: '添加 #标签' });
+      const commitTags = () => {
+        const raw = tagInput.value;
+        tagInput.value = '';
+        const parsed = raw.split(/[\s,，]+/).map((s) => s.replace(/^#/, '').trim()).filter(Boolean);
+        if (!parsed.length) return;
+        const f = findNode(this.doc.root, node.id);
+        if (!f) return;
+        const set = new Set([...(f.node.tags || []), ...parsed]);
+        f.node.tags = [...set].slice(0, 50);
+        this._saveFocus();
+        this.render();
+        this._emitChange(true);
+      };
+      tagInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); commitTags(); }
+        e.stopPropagation(); // 不触发行级结构操作
+      });
+      tagInput.addEventListener('blur', commitTags);
+      tagInput.addEventListener('click', (e) => e.stopPropagation());
+      tagsRow.append(tagInput);
+      contentKids.push(tagsRow);
+    }
+    // 文件/链接行
+    const hasFiles = node.files && node.files.length > 0;
+    if (hasFiles || selected) {
+      const filesRow = el('div', { class: 'node-files' });
+      (node.files || []).forEach((f) => {
+        if (f.isImage) {
+          const img = el('img', { class: 'node-file-img', src: f.dataUrl, alt: f.name, title: f.name });
+          img.addEventListener('click', () => window.open(f.dataUrl, '_blank'));
+          filesRow.append(img);
+        } else {
+          const chip = el('span', { class: 'node-file-chip', title: f.name }, f.name);
+          chip.addEventListener('click', () => window.open(f.dataUrl, '_blank'));
+          filesRow.append(chip);
+        }
+      });
+      if (selected) {
+        const addBtn = el('button', { class: 'node-file-add', title: '插入图片/附件(≤5MB)' }, '＋ 图片/附件');
+        addBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const input = document.createElement('input');
+          input.type = 'file';
+          input.accept = 'image/*,.pdf,.txt,.md,.doc,.docx,.xls,.xlsx,.zip';
+          input.onchange = () => {
+            const file = input.files && input.files[0];
+            if (!file) return;
+            if (file.size > 5 * 1024 * 1024) { this.notify?.('文件超过 5MB 上限'); return; }
+            const reader = new FileReader();
+            reader.onload = () => {
+              const f = findNode(this.doc.root, node.id);
+              if (!f) return;
+              if ((f.node.files || []).length >= 20) { this.notify?.('每节点最多 20 个文件'); return; }
+              f.node.files = f.node.files || [];
+              f.node.files.push({
+                id: 'f_' + Date.now().toString(36),
+                name: file.name,
+                mime: file.type,
+                dataUrl: reader.result,
+                isImage: !!file.type.startsWith('image/'),
+              });
+              this._saveFocus();
+              this.render();
+              this._emitChange(true);
+            };
+            reader.readAsDataURL(file);
+          };
+          input.click();
+        });
+        filesRow.append(addBtn);
+      }
+      contentKids.push(filesRow);
+    }
+    // 链接行
+    if (node.link || selected) {
+      if (node.link && !selected) {
+        contentKids.push(el('a', {
+          class: 'node-link-chip', href: node.link, target: '_blank', rel: 'noopener noreferrer',
+        }, '🔗 ' + node.link));
+      } else {
+        const linkInput = el('input', { class: 'node-link-input', dataset: { id: node.id }, value: node.link || '', placeholder: '添加链接 https://…' });
+        const commitLink = () => {
+          const v = linkInput.value.trim();
+          const f = findNode(this.doc.root, node.id);
+          if (!f) return;
+          f.node.link = (v && /^(https?:\/\/|mailto:)/i.test(v)) ? v : null;
+          this._saveFocus();
+          this.render();
+          this._emitChange(true);
+        };
+        linkInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') { e.preventDefault(); commitLink(); }
+          e.stopPropagation();
+        });
+        linkInput.addEventListener('blur', commitLink);
+        linkInput.addEventListener('click', (e) => e.stopPropagation());
+        contentKids.push(linkInput);
+      }
+    }
     const content = el('div', { class: 'outline-content' }, contentKids);
+    // 待办复选框(始终渲染;未勾选时淡显,点击即可添加待办)
+    const checkEl = el('button', {
+      class: 'node-check' + (node.checked ? ' checked' : '') + (selected ? ' active' : '') + (node.checked ? '' : ' ghost'),
+      dataset: { id: node.id },
+      title: '待办(点击切换)',
+    });
+    checkEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const f = findNode(this.doc.root, node.id);
+      if (!f) return;
+      f.node.checked = f.node.checked ? null : true;
+      this._saveFocus();
+      this.render();
+      this._emitChange(true);
+    });
     const row = el('div', {
-      class: 'outline-row' + (selected ? ' selected' : ''),
+      class: 'outline-row' + (selected ? ' selected' : '') + (node.checked ? ' is-checked' : ''),
       dataset: { id: node.id, depth: String(depth) },
       draggable: depth !== 0 ? 'true' : 'false',
-    }, [bullet, content]);
+    }, [checkEl, bullet, content]);
     row.style.paddingLeft = (depth * 22) + 'px';
 
     // 输入处理:仅更新模型,不重渲染;顺带刷新行高缓存
     text.addEventListener('input', () => {
+      // 先剥离搜索高亮 mark,避免污染 spans 重建
+      unwrapSearchMarks(text);
       const f = findNode(this.doc.root, node.id);
       if (f) {
         f.node.text = textToModel(text);
@@ -195,6 +443,8 @@ export class Outliner {
       if (h > 0) this._heights.set(node.id, h);
       this._emitChange(false);
     });
+    // 聚焦时剥离搜索高亮,防止编辑把 mark 存进模型
+    text.addEventListener('focus', () => { unwrapSearchMarks(text); });
     // 阻止 contenteditable 换行产生 div,手动插入保留换行
     text.addEventListener('paste', (e) => {
       e.preventDefault();
@@ -274,6 +524,37 @@ export class Outliner {
 
     const mod = e.ctrlKey || e.metaKey;
 
+    // Ctrl+Enter 切换待办
+    if (mod && e.key === 'Enter') {
+      e.preventDefault();
+      this.toggleTodo();
+      return;
+    }
+    // Ctrl+A 全选
+    if (mod && e.key.toLowerCase() === 'a') {
+      e.preventDefault();
+      this.selectAll();
+      return;
+    }
+    // Ctrl+C / Ctrl+X / Ctrl+V:有文本选区时走浏览器(文本复制);无选区时复制/粘贴节点
+    if (mod && ['c', 'x', 'v'].includes(e.key.toLowerCase())) {
+      const sel = window.getSelection();
+      const hasTextSel = sel && sel.rangeCount > 0 && !sel.isCollapsed;
+      const k = e.key.toLowerCase();
+      if (k === 'v') {
+        // 应用剪贴板为空时放行浏览器文本粘贴
+        if (hasTextSel || !Clipboard.getAppClipboard()) return;
+        e.preventDefault();
+        this.pasteTo(id);
+        return;
+      }
+      if (hasTextSel) return; // 文本复制/剪切走浏览器默认
+      e.preventDefault();
+      if (k === 'c') this.copySelected();
+      else this.cutSelected();
+      return;
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       // 在光标处分割文本和 spans
@@ -341,19 +622,24 @@ export class Outliner {
       return;
     }
 
+    // 多选时 Backspace/Delete 整批删除
+    if ((e.key === 'Backspace' || e.key === 'Delete') && this._selectedExtra.size > 0) {
+      e.preventDefault();
+      this.deleteSelected();
+      return;
+    }
     if (mod && (e.key === 'Backspace' || e.key === 'Delete')) {
       e.preventDefault();
-      if (!parent) return; // root 不可删
-      const target = previousVisibleId(this.doc.root, id) || nextVisibleId(this.doc.root, id) || parent.id;
-      removeNode(parent, index);
-      this.selectedId = target;
-      this._focusNode(target, 'end');
-      this._emitChange(true);
+      this.deleteSelected();
       return;
     }
 
     if (e.altKey && e.key === 'ArrowUp') {
       e.preventDefault();
+      if (this._selectedExtra.size > 0) {
+        this.moveSelectedBlock(-1);
+        return;
+      }
       if (parent && index > 0) {
         moveNode(parent, index, parent, index - 1);
         this._saveFocus();
@@ -364,6 +650,10 @@ export class Outliner {
     }
     if (e.altKey && e.key === 'ArrowDown') {
       e.preventDefault();
+      if (this._selectedExtra.size > 0) {
+        this.moveSelectedBlock(1);
+        return;
+      }
       if (parent && index < parent.children.length - 1) {
         moveNode(parent, index, parent, index + 1);
         this._saveFocus();
@@ -494,6 +784,205 @@ export class Outliner {
     this._emitChange(true);
   }
 
+  /** 对当前选区应用内联格式(execCommand + 触发 input 重建 spans) */
+  applyInlineFormat(cmd, value) {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+    const textEl = sel.anchorNode?.nodeType === Node.TEXT_NODE
+      ? sel.anchorNode.parentElement?.closest('.node-text')
+      : sel.anchorNode?.closest?.('.node-text');
+    if (!textEl) return;
+    // 高亮命令需要 styleWithCSS 才能产出 background 内联样式
+    if (cmd === 'hiliteColor') document.execCommand('styleWithCSS', false, true);
+    document.execCommand(cmd, false, value ?? null);
+    textEl.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  // ---------- 待办 / 多选批量 ----------
+  toggleTodo() {
+    const f = findNode(this.doc.root, this.selectedId);
+    if (!f) return;
+    f.node.checked = f.node.checked ? null : true;
+    this.render();
+    this._emitChange(true);
+  }
+
+  selectAll() {
+    if (!this._flat || !this._flat.length) return;
+    const ids = this._flat.map((x) => x.node.id);
+    this.selectedId = ids[0];
+    this._selectedExtra = new Set(ids.slice(1));
+    this.render();
+  }
+
+  deleteSelected() {
+    const ids = this.getSelectedIds();
+    const removed = removeNodesByIds(this.doc.root, new Set(ids));
+    if (!removed.length) return false;
+    this._selectedExtra.clear();
+    const target = previousVisibleId(this.doc.root, ids[0]) || nextVisibleId(this.doc.root, ids[0]) || this.doc.root.id;
+    this.selectedId = target;
+    this._focusNode(target, 'end');
+    this._emitChange(true);
+    return true;
+  }
+
+  indentSelectedMulti() {
+    const ids = [...this.getSelectedIds()];
+    let changed = false;
+    for (const id of ids) {
+      const f = findNode(this.doc.root, id);
+      if (f && f.parent && indent(f.parent, f.index)) changed = true;
+    }
+    if (changed) { this._saveFocus(); this.render(); this._emitChange(true); }
+  }
+
+  outdentSelectedMulti() {
+    const ids = [...this.getSelectedIds()];
+    let changed = false;
+    for (const id of ids) {
+      const f = findNode(this.doc.root, id);
+      if (!f || !f.parent) continue;
+      const gp = findNode(this.doc.root, f.parent.id);
+      if (outdent(f.parent, f.index, gp ? gp.parent : null)) changed = true;
+    }
+    if (changed) { this._saveFocus(); this.render(); this._emitChange(true); }
+  }
+
+  /** 多选整块移动(delta=-1/1);仅当全部选中同父时生效 */
+  moveSelectedBlock(delta) {
+    const map = groupIndicesByParent(this.doc.root, new Set(this.getSelectedIds()));
+    if (map.size !== 1) return false;
+    const [parent, indices] = [...map.entries()][0];
+    if (!moveBlock(parent, indices, delta)) return false;
+    this._saveFocus();
+    this.render();
+    this._emitChange(true);
+    return true;
+  }
+
+  // ---------- 剪贴板 ----------
+  copySelected() {
+    const nodes = collectTopmostNodes(this.doc.root, new Set(this.getSelectedIds()));
+    if (!nodes.length) return false;
+    const json = Clipboard.serializeNodes(nodes);
+    Clipboard.setAppClipboard(json);
+    try { navigator.clipboard?.writeText(nodes.map((n) => n.text).join('\n')).catch(() => {}); } catch (_) {}
+    return true;
+  }
+
+  cutSelected() {
+    if (!this.copySelected()) return false;
+    this.deleteSelected();
+    return true;
+  }
+
+  pasteTo(targetId) {
+    const json = Clipboard.getAppClipboard();
+    if (!json) { this.notify('剪贴板为空,请先复制/剪切节点'); return false; }
+    let nodes;
+    try { nodes = Clipboard.deserializeNodes(json); } catch (_) { return false; }
+    const tgt = findNode(this.doc.root, targetId);
+    if (!tgt) return false;
+    if (tgt.parent) {
+      insertAfter(tgt.parent, tgt.index, ...nodes);
+    } else {
+      // 目标为根:插入到其子节点最前
+      this.doc.root.children.unshift(...nodes);
+    }
+    this._selectedExtra.clear();
+    this.selectedId = nodes[0].id;
+    this._focusNode(nodes[0].id, 'end');
+    this._emitChange(true);
+    return true;
+  }
+
+  // ---------- 搜索 ----------
+  /** 设置搜索词,返回匹配数 */
+  setSearchQuery(q) {
+    this._searchQuery = (q || '').toLowerCase();
+    this._searchMatchIds = null;
+    this._searchIndex = -1;
+    if (!this._searchQuery) { this.render(); return 0; }
+    const ids = [];
+    for (const n of walkGen(this.doc.root)) {
+      if (((n.text || '') + '\n' + (n.note || '')).toLowerCase().includes(this._searchQuery)) ids.push(n.id);
+    }
+    this._searchMatchIds = ids;
+    this.render();
+    return ids.length;
+  }
+
+  nextMatch() {
+    if (!this._searchMatchIds || !this._searchMatchIds.length) return null;
+    this._searchIndex = (this._searchIndex + 1) % this._searchMatchIds.length;
+    return this.goToMatch(this._searchIndex);
+  }
+
+  prevMatch() {
+    if (!this._searchMatchIds || !this._searchMatchIds.length) return null;
+    this._searchIndex = (this._searchIndex - 1 + this._searchMatchIds.length) % this._searchMatchIds.length;
+    return this.goToMatch(this._searchIndex);
+  }
+
+  goToMatch(i) {
+    if (!this._searchMatchIds || i < 0 || i >= this._searchMatchIds.length) return null;
+    this._searchIndex = i;
+    const id = this._searchMatchIds[i];
+    this._selectedExtra.clear();
+    this.selectedId = id;
+    this._focusNode(id, 'end');
+    this.render();
+    return id;
+  }
+
+  replaceCurrent(replacement) {
+    if (this._searchIndex < 0 || !this._searchMatchIds) return false;
+    const id = this._searchMatchIds[this._searchIndex];
+    const f = findNode(this.doc.root, id);
+    if (!f) return false;
+    const q = this._searchQuery;
+    let changed = false;
+    if ((f.node.text || '').toLowerCase().includes(q)) {
+      f.node.text = replaceAllCI(f.node.text, q, replacement);
+      f.node.spans = null; // 替换会破坏 spans 偏移,重置为统一样式
+      changed = true;
+    }
+    if ((f.node.note || '').toLowerCase().includes(q)) {
+      f.node.note = replaceAllCI(f.node.note, q, replacement);
+      changed = true;
+    }
+    if (changed) {
+      this.setSearchQuery(q);
+      this._emitChange(true);
+      this.render();
+    }
+    return changed;
+  }
+
+  replaceAll(replacement) {
+    const q = this._searchQuery;
+    if (!q) return 0;
+    let count = 0;
+    const re = new RegExp(escapeRegExp(q), 'gi');
+    for (const n of walkGen(this.doc.root)) {
+      if ((n.text || '').toLowerCase().includes(q)) {
+        count += (n.text.match(re) || []).length;
+        n.text = replaceAllCI(n.text, q, replacement);
+        n.spans = null;
+      }
+      if ((n.note || '').toLowerCase().includes(q)) {
+        n.note = replaceAllCI(n.note, q, replacement);
+      }
+    }
+    if (count) {
+      this.setSearchQuery(q);
+      this._emitChange(true);
+      this.render();
+    }
+    return count;
+  }
+
   collapseAll() {
     for (const n of walkGen(this.doc.root)) {
       if (n === this.doc.root) continue; // 不折叠根节点(文档本身)
@@ -614,6 +1103,53 @@ function* walkGen(node) {
   if (node.children) for (const c of node.children) yield* walkGen(c);
 }
 
+function collectTopmostNodes(root, idSet) {
+  return collectTopmost(root, idSet).map((t) => t.node);
+}
+
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function replaceAllCI(str, from, to) {
+  return String(str).replace(new RegExp(escapeRegExp(from), 'gi'), to);
+}
+
+/** 在节点文本内高亮搜索词(显示层,用 mark.search-hit,编辑前剥离) */
+function highlightSearchMatches(textEl, query) {
+  const q = String(query).toLowerCase();
+  const re = new RegExp('(' + escapeRegExp(query) + ')', 'gi');
+  const walker = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      if (node.textContent.toLowerCase().includes(q)) {
+        const frag = document.createDocumentFragment();
+        node.textContent.split(re).forEach((p) => {
+          if (!p) return;
+          if (p.toLowerCase() === q) {
+            const mark = document.createElement('mark');
+            mark.className = 'search-hit';
+            mark.textContent = p;
+            frag.append(mark);
+          } else {
+            frag.append(document.createTextNode(p));
+          }
+        });
+        node.parentNode.replaceChild(frag, node);
+      }
+    } else {
+      [...node.childNodes].forEach(walker);
+    }
+  };
+  [...textEl.childNodes].forEach(walker);
+}
+
+/** 剥离搜索高亮 mark(编辑/重建 spans 前调用) */
+function unwrapSearchMarks(textEl) {
+  textEl.querySelectorAll('mark.search-hit').forEach((m) => {
+    m.replaceWith(document.createTextNode(m.textContent));
+  });
+}
+
 function previousVisibleId(root, id) {
   const flat = flattenVisible(root);
   const i = flat.findIndex((x) => x.node.id === id);
@@ -638,15 +1174,39 @@ function textToModel(textEl) {
   return out;
 }
 
+/** span 是否带任何样式(颜色/加粗/斜体/下划线/删除线/高亮) */
+function spanStyled(sp) {
+  return !!(sp && (sp.color || sp.b || sp.i || sp.u || sp.s || sp.hl));
+}
+
+/** 复制 span 属性到新文本 */
+function copySpan(sp, text) {
+  return { text, color: sp?.color || null, b: !!sp?.b, i: !!sp?.i, u: !!sp?.u, s: !!sp?.s, hl: sp?.hl || null };
+}
+
+/** span 的 CSS 样式串 */
+function spanStyle(sp) {
+  const parts = [];
+  if (sp.color) parts.push(`color:${sp.color}`);
+  if (sp.b) parts.push('font-weight:bold');
+  if (sp.i) parts.push('font-style:italic');
+  const deco = [];
+  if (sp.u) deco.push('underline');
+  if (sp.s) deco.push('line-through');
+  if (deco.length) parts.push(`text-decoration:${deco.join(' ')}`);
+  if (sp.hl) parts.push(`background:${sp.hl}`);
+  return parts.join(';');
+}
+
 function textToHtml(text, spans, fontColor) {
   if (!text) return '';
-  const hasSpans = Array.isArray(spans) && spans.length > 0 && spans.some((s) => s.color);
+  const hasSpans = Array.isArray(spans) && spans.length > 0 && spans.some(spanStyled);
   if (!hasSpans) {
-    // 无逐字颜色:纯文本 + <br>
+    // 无逐字样式:纯文本 + <br>
     const lines = escapeHtml(text).split('\n');
     return lines.map((l, i) => i === 0 ? l : '<br>' + l).join('');
   }
-  // 有 spans:按 \n 拆行,每行内按 span 片段渲染 <span style="color:...">
+  // 有 spans:按 \n 拆行,每行内按 span 片段渲染 <span style="...">
   const result = [];
   let pos = 0;
   for (let lineIdx = 0; ; lineIdx++) {
@@ -664,7 +1224,8 @@ function textToHtml(text, spans, fontColor) {
       const clipEnd = Math.min(spEnd, lineEnd) - spStart;
       const segment = sp.text.slice(clipStart, clipEnd);
       if (segment) {
-        if (sp.color) result.push(`<span style="color:${sp.color}">${escapeHtml(segment)}</span>`);
+        const style = spanStyle(sp);
+        if (style) result.push(`<span style="${style}">${escapeHtml(segment)}</span>`);
         else result.push(escapeHtml(segment));
       }
       linePos = spEnd;
@@ -675,28 +1236,60 @@ function textToHtml(text, spans, fontColor) {
   return result.join('');
 }
 
-/** 从 contenteditable DOM 重建 spans 数组 */
+/** 从 contenteditable DOM 重建 spans 数组(沿祖先收集有效样式) */
 function spansFromDom(textEl) {
   const spans = [];
-  let hasColor = false;
-  textEl.childNodes.forEach((n) => {
+  let hasStyle = false;
+  // 沿祖先链汇总某文本节点上的生效样式
+  const effectiveStyle = (el) => {
+    const sp = { color: null, b: false, i: false, u: false, s: false, hl: null };
+    let node = el;
+    while (node && node !== textEl) {
+      const name = node.nodeName;
+      const st = node.style;
+      if (name === 'B' || name === 'STRONG' || name === 'SPAN') {
+        const fw = st ? st.fontWeight : null;
+        if (name === 'B' || name === 'STRONG' || fw === 'bold' || (fw && parseInt(fw, 10) >= 600)) sp.b = true;
+        if (st && st.color) sp.color = st.color;
+        if (st && st.fontStyle === 'italic') sp.i = true;
+        if (st && /underline/.test(st.textDecoration)) sp.u = true;
+        if (st && /line-through/.test(st.textDecoration)) sp.s = true;
+        if (st && /^#/.test(st.backgroundColor)) sp.hl = st.backgroundColor;
+      } else if (name === 'I' || name === 'EM') {
+        sp.i = true;
+      } else if (name === 'U') {
+        sp.u = true;
+      } else if (name === 'S' || name === 'STRIKE' || name === 'DEL') {
+        sp.s = true;
+      } else if (name === 'MARK') {
+        sp.hl = '#ffff00';
+      }
+      node = node.parentElement;
+    }
+    return sp;
+  };
+  const walk = (n) => {
     if (n.nodeType === Node.TEXT_NODE) {
-      if (n.textContent) spans.push({ text: n.textContent, color: null });
+      if (n.textContent) {
+        const st = effectiveStyle(n.parentElement);
+        if (spanStyled(st)) hasStyle = true;
+        spans.push(copySpan(st, n.textContent));
+      }
     } else if (n.nodeName === 'BR') {
       spans.push({ text: '\n', color: null });
     } else if (n.nodeName === 'DIV') {
+      // contenteditable 换行可能生成 DIV,保留结构
       if (spans.length > 0) spans.push({ text: '\n', color: null });
-      if (n.textContent) spans.push({ text: n.textContent, color: null });
-    } else if (n.nodeName === 'SPAN') {
-      const color = n.style.color || null;
-      if (color) hasColor = true;
-      if (n.textContent) spans.push({ text: n.textContent, color });
+      n.childNodes.forEach(walk);
+    } else {
+      n.childNodes.forEach(walk);
     }
-  });
-  return hasColor && spans.length > 0 ? spans : null;
+  };
+  walk(textEl);
+  return hasStyle && spans.length > 0 ? spans : null;
 }
 
-/** 在指定偏移量处拆分 spans 数组 */
+/** 在指定偏移量处拆分 spans 数组(保留富文本属性) */
 function splitSpansAtOffset(spans, offset, newText, isAfter) {
   if (!spans || spans.length === 0) return null;
   const result = [];
@@ -704,15 +1297,15 @@ function splitSpansAtOffset(spans, offset, newText, isAfter) {
   for (const sp of spans) {
     const spEnd = pos + sp.text.length;
     if (spEnd <= offset) { pos = spEnd; continue; }
-    if (pos >= offset) { result.push({ text: sp.text, color: sp.color }); pos = spEnd; continue; }
+    if (pos >= offset) { result.push(copySpan(sp, sp.text)); pos = spEnd; continue; }
     // span 跨越分割点
     const beforeText = sp.text.slice(0, offset - pos);
     const afterText = sp.text.slice(offset - pos);
-    if (!isAfter && beforeText) result.push({ text: beforeText, color: sp.color });
-    if (isAfter && afterText) result.push({ text: afterText, color: sp.color });
+    if (!isAfter && beforeText) result.push(copySpan(sp, beforeText));
+    if (isAfter && afterText) result.push(copySpan(sp, afterText));
     pos = spEnd;
   }
-  return result.length > 0 && result.some((s) => s.color) ? result : null;
+  return result.length > 0 && result.some(spanStyled) ? result : null;
 }
 
 function caretOffset(el) {

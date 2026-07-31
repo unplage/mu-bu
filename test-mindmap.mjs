@@ -376,6 +376,151 @@ console.log('--- Mindmap 连续字号 ---');
   assert(doc.root.children[0].fontSize === 12, 'applyFontSize("S") → 12');
 }
 
+console.log('--- Mindmap 富文本 spans 渲染 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = 'Hello';
+  doc.root.spans = [
+    { text: 'He', b: true, color: null },
+    { text: 'llo', i: true, u: true, hl: '#ffff00' },
+  ];
+  const container = document.createElement('div');
+  const mm = new Mindmap(container, doc, () => {});
+  mm.render();
+  const ts = container.querySelectorAll('.mm-node[data-id="' + doc.root.id + '"] .mm-node-text tspan');
+  assert(ts.length === 2, '2 个 tspan, got ' + ts.length);
+  assert(ts[0].getAttribute('font-weight') === 'bold', '第一段加粗');
+  assert(ts[1].getAttribute('font-style') === 'italic', '第二段斜体');
+  assert(ts[1].getAttribute('text-decoration') === 'underline', '第二段下划线');
+  const hl = container.querySelector('.mm-node[data-id="' + doc.root.id + '"] rect[fill="#ffff00"]');
+  assert(hl !== null, '高亮背景 rect');
+}
+
+console.log('--- Mindmap 多选 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = '根';
+  doc.root.children.push(createNode('A'));
+  doc.root.children.push(createNode('B'));
+  const aId = doc.root.children[0].id;
+  const bId = doc.root.children[1].id;
+  const container = document.createElement('div');
+  const mm = new Mindmap(container, doc, () => {});
+  mm.render();
+  mm._select(aId, true);
+  mm._select(bId, true);
+  const ids = mm.getSelectedIds();
+  assert(ids.length === 3 && ids.includes(aId) && ids.includes(bId), 'Ctrl 多选含 A,B');
+  mm._select(bId, true);
+  assert(!mm.getSelectedIds().includes(bId), '再点取消 B');
+}
+
+console.log('--- Mindmap 节点拖拽重排 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = '根';
+  doc.root.children.push(createNode('A'));
+  doc.root.children.push(createNode('B'));
+  const aId = doc.root.children[0].id;
+  const bId = doc.root.children[1].id;
+  const container = document.createElement('div');
+  const mm = new Mindmap(container, doc, () => {});
+  mm.render();
+  mm._dragCandidate = { id: aId };
+  mm._enterNodeDrag();
+  const bG = container.querySelector('.mm-node[data-id="' + bId + '"]');
+  const orig = document.elementFromPoint;
+  document.elementFromPoint = () => bG;
+  bG.getBoundingClientRect = () => ({ top: 0, left: 0, height: 100, width: 100 });
+  mm._updateNodeDrag({ clientX: 10, clientY: 80 }); // 80% → after
+  assert(mm._dropTarget && mm._dropTarget.place === 'after', '拖拽判定 after');
+  mm._finishNodeDrag();
+  document.elementFromPoint = orig;
+  assert(doc.root.children[0].id === bId && doc.root.children[1].id === aId, 'A 移到 B 之后');
+}
+
+console.log('--- Mindmap 待办标记 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = '根';
+  doc.root.children.push(createNode('A'));
+  doc.root.children[0].checked = true;
+  const container = document.createElement('div');
+  const mm = new Mindmap(container, doc, () => {});
+  mm.render();
+  const marker = container.querySelector('.mm-node[data-id="' + doc.root.children[0].id + '"] rect[x="4"]');
+  assert(marker !== null && marker.getAttribute('fill') === '#4f8cf0', '勾选标记渲染');
+  mm._toggleTodo(doc.root.children[0]);
+  assert(doc.root.children[0].checked === null, 'Ctrl+Enter 切换取消勾选');
+  mm._toggleTodo(doc.root.children[0]);
+  assert(doc.root.children[0].checked === true, '再切恢复勾选');
+}
+
+console.log('--- Mindmap 主题 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = '根';
+  doc.root.children.push(createNode('A'));
+  doc.theme = 'ocean';
+  const container = document.createElement('div');
+  const mm = new Mindmap(container, doc, () => {});
+  mm.selectedId = null;
+  mm.render();
+  const rootRect = container.querySelector('.mm-node[data-id="' + doc.root.id + '"] .mm-node-rect');
+  assert(rootRect.getAttribute('fill') === '#2c6ed5', '主题根节点填充 ocean');
+  const childRect = container.querySelector('.mm-node[data-id="' + doc.root.children[0].id + '"] .mm-node-rect');
+  assert(childRect.getAttribute('stroke') === '#2c6ed5', '主题子节点描边 ocean');
+  assert(container.style.background === '#eef4fb', '主题背景色应用');
+}
+
+console.log('--- Mindmap 备注渲染 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = '根';
+  doc.root.children.push(createNode('A'));
+  doc.root.children[0].note = '这是备注';
+  const container = document.createElement('div');
+  const mm = new Mindmap(container, doc, () => {});
+  mm.render();
+  const noteText = [...container.querySelectorAll('.mm-node[data-id="' + doc.root.children[0].id + '"] text')]
+    .find((t) => t.getAttribute('font-size') === '12' && t.textContent === '这是备注');
+  assert(noteText !== null, '备注渲染为灰色小字');
+}
+
+console.log('--- Mindmap 图片渲染 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = '根';
+  doc.root.children.push(createNode('A'));
+  doc.root.children[0].files = [{ id: 'f', name: 'a.png', mime: 'image/png', dataUrl: 'data:image/png;base64,AAAA', isImage: true }];
+  const container = document.createElement('div');
+  const mm = new Mindmap(container, doc, () => {});
+  mm.render();
+  const img = container.querySelector('.mm-node[data-id="' + doc.root.children[0].id + '"] image');
+  assert(img !== null, '图片 <image> 渲染');
+  assert(img.getAttribute('href') === 'data:image/png;base64,AAAA', 'href 正确');
+  const h = parseFloat(container.querySelector('.mm-node[data-id="' + doc.root.children[0].id + '"] .mm-node-rect').getAttribute('height'));
+  assert(h > 50, '图片使节点高度增大, got ' + h);
+}
+
+console.log('--- Mindmap 复制/粘贴 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = '根';
+  doc.root.children.push(createNode('A'));
+  const aId = doc.root.children[0].id;
+  const container = document.createElement('div');
+  const mm = new Mindmap(container, doc, () => {});
+  mm.render();
+  mm.selectedId = aId;
+  assert(mm.copySelected() === true, 'copy 成功');
+  const before = doc.root.children.length;
+  assert(mm.pasteTo(aId) === true, 'paste 成功');
+  assert(doc.root.children.length === before + 1, '多一个兄弟');
+  const pasted = doc.root.children[doc.root.children.length - 1];
+  assert(pasted.id !== aId && pasted.text === 'A', '新 id + 内容一致');
+}
+
 console.log('--- Mindmap 背景色 hex ---');
 {
   const doc = createDoc('T');

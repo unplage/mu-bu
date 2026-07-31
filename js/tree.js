@@ -100,3 +100,92 @@ export function countNodes(root, visibleOnly = false) {
   }
   return n;
 }
+
+/** 收集选中集里最顶层的节点(含子节点的祖先被选中时,子树整体视为一项) */
+export function collectTopmost(root, idSet) {
+  const out = [];
+  const rec = (node, parent, index) => {
+    if (idSet.has(node.id)) { out.push({ node, parent, index }); return; }
+    if (node.children) node.children.forEach((c, i) => rec(c, node, i));
+  };
+  rec(root, null, -1);
+  return out;
+}
+
+/** 批量删除选中节点(返回被删除的节点数组);root 不可删 */
+export function removeNodesByIds(root, idSet) {
+  const targets = collectTopmost(root, idSet)
+    .filter((t) => t.parent)
+    .sort((a, b) => {
+      if (a.parent === b.parent) return b.index - a.index; // 同父先删索引大的
+      return 0;
+    });
+  return targets.map(({ parent, index }) => parent.children.splice(index, 1)[0]);
+}
+
+/** 按父节点分组选中节点索引:Map<parent, number[]> */
+export function groupIndicesByParent(root, idSet) {
+  const map = new Map();
+  for (const { parent, index } of collectTopmost(root, idSet)) {
+    if (!parent) continue;
+    if (!map.has(parent)) map.set(parent, []);
+    map.get(parent).push(index);
+  }
+  for (const arr of map.values()) arr.sort((a, b) => a - b);
+  return map;
+}
+
+/** 同一父节点内整块上移/下移 delta 位(多选移动),返回是否成功 */
+export function moveBlock(parent, indices, delta) {
+  if (!indices || indices.length === 0 || delta === 0) return false;
+  const sorted = [...indices].sort((a, b) => a - b);
+  const k = sorted.length;
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+  const n = parent.children.length;
+  let insertAt;
+  if (delta > 0) {
+    if (last + 1 >= n) return false;
+    insertAt = last - k + 2;
+  } else {
+    if (first <= 0) return false;
+    insertAt = first - 1;
+  }
+  const nodes = sorted.map((i) => parent.children[i]);
+  nodes.forEach(() => parent.children.splice(first, 1));
+  parent.children.splice(insertAt, 0, ...nodes);
+  return true;
+}
+
+/** 排序兄弟节点:mode = name|time|length,dir = 1 升 / -1 降 */
+export function sortSiblings(parent, mode = 'name', dir = 1) {
+  if (!parent.children || parent.children.length < 2) return false;
+  const sorted = [...parent.children];
+  sorted.sort((a, b) => {
+    if (mode === 'time') {
+      const ka = a.createdAt || 0, kb = b.createdAt || 0;
+      return ka === kb ? 0 : (ka < kb ? -1 : 1);
+    }
+    if (mode === 'length') {
+      const ka = (a.text || '').length, kb = (b.text || '').length;
+      return ka === kb ? 0 : (ka < kb ? -1 : 1);
+    }
+    return (a.text || '').localeCompare(b.text || '', 'zh');
+  });
+  parent.children = dir > 0 ? sorted : sorted.reverse();
+  return true;
+}
+
+/** 统计节点数/字符数/字数(text+note,供字数统计) */
+export function countText(root) {
+  let nodes = 0, chars = 0, words = 0;
+  const rec = (n) => {
+    nodes++;
+    const txt = ((n.text || '') + '\n' + (n.note || '')).trim();
+    chars += txt.length;
+    words += (txt.match(/\S+/g) || []).length;
+    if (n.children) n.children.forEach(rec);
+  };
+  rec(root);
+  return { nodes, chars, words };
+}

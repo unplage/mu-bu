@@ -2,6 +2,7 @@
 import * as Tree from './js/tree.js';
 import * as Export from './js/export.js';
 import * as Share from './js/share.js';
+import * as Clipboard from './js/clipboard.js';
 
 let pass = 0, fail = 0;
 function assert(cond, msg) {
@@ -309,6 +310,145 @@ console.log('--- share 往返保留 layout/side ---');
   const hash2 = await Share.encodeShare(doc);
   const decoded2 = await Share.decodeShare(hash2);
   assert(decoded2.layout === 'right', '默认 layout 不编码');
+}
+
+console.log('--- validateDoc 新字段归一化 ---');
+{
+  const v = Export.validateDoc({
+    title: 'T', theme: 'ocean',
+    root: {
+      text: 'x', checked: true, tags: ['#a', '', ' b ', 3],
+      link: 'https://example.com', createdAt: 123, side: 0,
+      spans: [{ text: 'x', color: '#f00', b: true, i: true, u: true, s: true, hl: '#ffff00' }],
+      children: [{ text: 'y', files: [{ name: 'a.png', dataUrl: 'data:image/png;base64,AAAA' }] }],
+    },
+  });
+  assert(v.theme === 'ocean', 'theme 保留');
+  assert(v.root.checked === true, 'checked 归一化');
+  assert(JSON.stringify(v.root.tags) === JSON.stringify(['a', 'b', '3']), 'tags 去 # 去空, got ' + JSON.stringify(v.root.tags));
+  assert(v.root.link === 'https://example.com', 'link 保留');
+  assert(v.root.createdAt === 123, 'createdAt 保留');
+  assert(v.root.spans[0].b && v.root.spans[0].i && v.root.spans[0].u && v.root.spans[0].s, '富文本属性保留');
+  assert(v.root.spans[0].hl === '#ffff00', '高亮色保留');
+  assert(v.root.children[0].files[0].dataUrl.startsWith('data:'), 'files 保留');
+  const v2 = Export.validateDoc({ title: 'T', root: { text: 'x', link: 'javascript:alert(1)' } });
+  assert(v2.root.link === null, '非法 link 归 null');
+}
+
+console.log('--- share 往返新字段 ---');
+{
+  const doc = {
+    id: 'doc_x', title: '新字段', layout: 'radial', theme: 'ocean', createdAt: 1, updatedAt: 2,
+    root: {
+      id: 'r', text: 'Hi', note: '', color: 'red', collapsed: false, fontSize: 20, side: 1,
+      checked: true, tags: ['重要', '待办'], link: 'https://a.com', createdAt: 42,
+      spans: [{ text: 'H', color: '#ff0000', b: true }, { text: 'i', hl: '#ffff00', u: true }],
+      children: [],
+    },
+  };
+  const hash = await Share.encodeShare(doc);
+  const d = await Share.decodeShare(hash);
+  assert(d.theme === 'ocean', 'theme 往返');
+  assert(d.root.checked === true, 'checked 往返');
+  assert(JSON.stringify(d.root.tags) === JSON.stringify(['重要', '待办']), 'tags 往返');
+  assert(d.root.link === 'https://a.com', 'link 往返');
+  assert(d.root.createdAt === 42, 'createdAt 往返');
+  assert(d.root.spans[0].b === true, 'span bold 往返');
+  assert(d.root.spans[1].hl === '#ffff00' && d.root.spans[1].u === true, 'span 高亮/下划线 往返');
+  assert(d.root.files === null, 'files 不随分享(体积)');
+}
+
+console.log('--- tree collectTopmost / removeNodesByIds ---');
+{
+  const root = {
+    id: 'root', text: 'R', children: [
+      { id: 'a', text: 'A', children: [
+        { id: 'a1', text: 'A1', children: [] },
+        { id: 'a2', text: 'A2', children: [] },
+      ] },
+      { id: 'b', text: 'B', children: [{ id: 'b1', text: 'B1', children: [] }] },
+    ],
+  };
+  // a 与 a1 同时选中:只取最顶层 a
+  const top = Tree.collectTopmost(root, new Set(['a', 'a1', 'b']));
+  assert(top.length === 2, '顶层选中 a+b, got ' + top.length);
+  assert(top.some((t) => t.node.id === 'a'), '含 a');
+  assert(top.some((t) => t.node.id === 'b'), '含 b');
+  // 批量删除 a + b(索引安全)
+  Tree.removeNodesByIds(root, new Set(['a', 'b']));
+  assert(root.children.length === 0, '删除后顶层为空');
+}
+
+console.log('--- tree groupIndicesByParent / moveBlock ---');
+{
+  const root = {
+    id: 'root', text: 'R', children: [
+      { id: 'a', text: 'A', children: [] },
+      { id: 'b', text: 'B', children: [] },
+      { id: 'c', text: 'C', children: [] },
+      { id: 'd', text: 'D', children: [] },
+    ],
+  };
+  const g = Tree.groupIndicesByParent(root, new Set(['b', 'c']));
+  assert(g.size === 1 && JSON.stringify(g.get(root)) === JSON.stringify([1, 2]), 'b,c 分到 root 组');
+  assert(Tree.moveBlock(root, g.get(root), -1), '整块上移成功');
+  assert(root.children[0].id === 'b' && root.children[1].id === 'c', '上移后 b,c 在最前');
+  const g2 = Tree.groupIndicesByParent(root, new Set(['b', 'c']));
+  assert(!Tree.moveBlock(root, g2.get(root), -1), '已在顶部不能再上移');
+  const g3 = Tree.groupIndicesByParent(root, new Set(['b', 'c']));
+  assert(Tree.moveBlock(root, g3.get(root), 1), '整块下移成功');
+  assert(root.children[1].id === 'b' && root.children[2].id === 'c', '下移后 b,c 在 1,2');
+}
+
+console.log('--- tree sortSiblings ---');
+{
+  const root = {
+    id: 'root', text: 'R', children: [
+      { id: 'b', text: 'Banana', createdAt: 3, children: [] },
+      { id: 'a', text: 'apple', createdAt: 1, children: [] },
+      { id: 'c', text: 'Cherry long', createdAt: 2, children: [] },
+    ],
+  };
+  Tree.sortSiblings(root, 'name', 1);
+  assert(root.children[0].text === 'apple', '名称升序 apple 第一');
+  Tree.sortSiblings(root, 'name', -1);
+  assert(root.children[0].text === 'Cherry long', '名称降序 Cherry 第一');
+  Tree.sortSiblings(root, 'time', 1);
+  assert(root.children[0].text === 'apple', '时间升序 apple(createdAt=1) 第一');
+  Tree.sortSiblings(root, 'length', 1);
+  assert(root.children[0].text === 'apple', '字数升序 apple(5) 第一');
+}
+
+console.log('--- tree countText ---');
+{
+  const root = {
+    id: 'root', text: '你好 world', note: '备注', children: [
+      { id: 'a', text: 'ab', note: '', children: [] },
+    ],
+  };
+  const s = Tree.countText(root);
+  assert(s.nodes === 2, '2 节点');
+  assert(s.chars === 13, '字符数(中文按字符计), got ' + s.chars);
+  assert(s.words === 4, '词数, got ' + s.words);
+}
+
+console.log('--- clipboard 序列化/反序列化 ---');
+{
+  const nodes = [{
+    id: 'x', text: '根', note: 'n', color: 'red', fontColor: '#f00', spans: [{ text: '根', color: '#f00', b: true }],
+    collapsed: true, fontSize: 'L', side: 1, checked: true, tags: ['t'], link: 'https://a.com',
+    files: [{ id: 'f', name: 'a.png', dataUrl: 'data:image/png;base64,AAAA' }],
+    children: [{ id: 'y', text: '子', children: [], fontSize: 'M', side: 0 }],
+  }];
+  const json = Clipboard.serializeNodes(nodes);
+  const out = Clipboard.deserializeNodes(json);
+  assert(out.length === 1, '反序列化 1 节点');
+  assert(out[0].id !== 'x' && out[0].children[0].id !== 'y', 'id 全部重新生成');
+  assert(out[0].text === '根' && out[0].spans[0].b === true, '内容与富文本保留');
+  assert(out[0].tags[0] === 't' && out[0].link === 'https://a.com', 'tags/link 保留');
+  assert(out[0].files === null, 'files 不随剪贴板');
+  assert(Clipboard.isNodeClipboard(json), 'isNodeClipboard 识别');
+  assert(!Clipboard.isNodeClipboard('not json'), '非法剪贴板识别');
 }
 
 console.log(`\n=== ${pass} passed, ${fail} failed ===`);

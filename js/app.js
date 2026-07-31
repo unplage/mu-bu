@@ -5,7 +5,7 @@ import * as DB from './db.js';
 import * as Export from './export.js';
 import * as Share from './share.js';
 import { el, COLORS, formatDate, debounce, isMobile } from './utils.js';
-import { findNode } from './tree.js';
+import { findNode, countText, sortSiblings, flattenVisible } from './tree.js';
 
 const $ = (s) => document.querySelector(s);
 
@@ -143,6 +143,39 @@ class App {
       layoutPopover: $('#layoutPopover'),
       indentBtn: $('#indentBtn'),
       outdentBtn: $('#outdentBtn'),
+      fmtBold: $('#fmtBold'),
+      fmtItalic: $('#fmtItalic'),
+      fmtUnderline: $('#fmtUnderline'),
+      fmtStrike: $('#fmtStrike'),
+      fmtHighlight: $('#fmtHighlight'),
+      sortBtn: $('#sortBtn'),
+      sortPopover: $('#sortPopover'),
+      focusBtn: $('#focusBtn'),
+      focusBar: $('#focusBar'),
+      focusBack: $('#focusBack'),
+      focusTitle: $('#focusTitle'),
+      presentBtn: $('#presentBtn'),
+      presentModal: $('#presentModal'),
+      presentContent: $('#presentContent'),
+      presentPrev: $('#presentPrev'),
+      presentNext: $('#presentNext'),
+      presentExit: $('#presentExit'),
+      searchToggle: $('#searchToggle'),
+      searchBar: $('#searchBar'),
+      searchInput: $('#searchInput'),
+      searchPrev: $('#searchPrev'),
+      searchNext: $('#searchNext'),
+      searchCount: $('#searchCount'),
+      searchReplace: $('#searchReplace'),
+      searchReplaceOne: $('#searchReplaceOne'),
+      searchReplaceAll: $('#searchReplaceAll'),
+      searchClose: $('#searchClose'),
+      tagBar: $('#tagBar'),
+      tocBtn: $('#tocBtn'),
+      tocPanel: $('#tocPanel'),
+      tocList: $('#tocList'),
+      tocClose: $('#tocClose'),
+      olStatus: $('#olStatus'),
     };
   }
 
@@ -167,15 +200,141 @@ class App {
     this.el.outdentBtn.addEventListener('click', () => { if (this.outliner) this.outliner.outdentSelected(); });
 
     document.addEventListener('keydown', (e) => {
-      // 内容编辑态(大纲 contenteditable / 导图输入框)内放行原生文本撤销
       if (e.isComposing || e.keyCode === 229) return;
-      const inTextEdit = e.target.closest?.('.node-text, .mm-edit');
-      if (inTextEdit) return;
       const mod = e.ctrlKey || e.metaKey;
-      if (mod && e.key.toLowerCase() === 'z') {
+      const inTextEdit = e.target.closest?.('.node-text, .mm-edit');
+      const k = e.key.toLowerCase();
+      // 搜索(Ctrl+F)
+      if (mod && k === 'f') {
+        e.preventDefault();
+        this._openSearch();
+        return;
+      }
+      // 内容编辑态内:Ctrl+Z 放行原生文本撤销;Ctrl+B/I/U 由浏览器原生处理
+      if (inTextEdit) return;
+      if (mod && k === 'z') {
         e.preventDefault();
         if (e.shiftKey) this._redo(); else this._undo();
+        return;
       }
+      // 焦点不在文本编辑框时,Ctrl+C/X/V 作用于选中节点
+      if (mod && ['c', 'x', 'v'].includes(k)) {
+        if (this.view === 'outline' && this.outliner) {
+          e.preventDefault();
+          if (k === 'c') this.outliner.copySelected();
+          else if (k === 'x') this.outliner.cutSelected();
+          else this.outliner.pasteTo(this.outliner.selectedId);
+        } else if (this.view === 'mindmap' && this.mindmap) {
+          e.preventDefault();
+          if (k === 'c') this.mindmap.copySelected();
+          else if (k === 'x') this.mindmap.cutSelected();
+          else this.mindmap.pasteTo(this.mindmap.selectedId);
+        }
+        return;
+      }
+      // Ctrl+A 全选
+      if (mod && k === 'a' && this.view === 'outline') {
+        e.preventDefault();
+        this.outliner?.selectAll();
+      }
+    });
+
+    // 富文本格式按钮:mousedown 时保存文本选区(按钮会抢焦点),click 时恢复并执行
+    const fmtCmd = (cmd) => ({
+      mousedown: (e) => { e.preventDefault(); this._saveTextSelection(); },
+      click: () => {
+        if (!this.outliner) return;
+        const saved = this._savedTextSelection;
+        this._savedTextSelection = null;
+        if (!saved?.range) { this.toast('请先选中要格式化的文本'); return; }
+        const sel = window.getSelection();
+        saved.textEl.focus();
+        sel.removeAllRanges();
+        sel.addRange(saved.range);
+        this.outliner.applyInlineFormat(cmd);
+      },
+    });
+    for (const [btn, cmd] of [
+      [this.el.fmtBold, 'bold'],
+      [this.el.fmtItalic, 'italic'],
+      [this.el.fmtUnderline, 'underline'],
+      [this.el.fmtStrike, 'strikeThrough'],
+      [this.el.fmtHighlight, 'hiliteColor'],
+    ]) {
+      btn.addEventListener('mousedown', fmtCmd(cmd).mousedown);
+      btn.addEventListener('click', fmtCmd(cmd).click);
+    }
+
+    // 排序
+    this.el.sortBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const show = this.el.sortPopover.hidden;
+      this._hideAllPopovers();
+      if (show) this._positionPopover(this.el.sortPopover, this.el.sortBtn);
+    });
+    this.el.sortPopover.addEventListener('click', (e) => {
+      const item = e.target.closest('[data-sort]');
+      if (!item) return;
+      const [mode, dir] = item.dataset.sort.split(':');
+      this._sortSelected(mode, parseInt(dir, 10));
+      this.el.sortPopover.hidden = true;
+    });
+
+    // 聚焦
+    this.el.focusBtn.addEventListener('click', () => {
+      const id = this._currentSelectedId();
+      if (!id) return;
+      const node = this._findNode(this.doc.root, id);
+      if (!node) return;
+      this._setFocusNode(node);
+    });
+    this.el.focusBack.addEventListener('click', () => this._clearFocus());
+
+    // 放映
+    this.el.presentBtn.addEventListener('click', () => this._openPresent());
+    this.el.presentPrev.addEventListener('click', () => this._presentStep(-1));
+    this.el.presentNext.addEventListener('click', () => this._presentStep(1));
+    this.el.presentExit.addEventListener('click', () => this._closePresent());
+    this.el.presentContent.addEventListener('click', () => this._presentStep(1));
+
+    // 搜索
+    this.el.searchToggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (this.el.searchBar.hidden) this._openSearch(); else this._closeSearch();
+    });
+    this.el.searchInput.addEventListener('input', () => this._doSearch());
+    this.el.searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); if (e.shiftKey) this._searchStep(-1); else this._searchStep(1); }
+      if (e.key === 'Escape') this._closeSearch();
+      e.stopPropagation();
+    });
+    this.el.searchPrev.addEventListener('click', () => this._searchStep(-1));
+    this.el.searchNext.addEventListener('click', () => this._searchStep(1));
+    this.el.searchReplaceOne.addEventListener('click', () => {
+      if (!this.outliner) return;
+      if (this.outliner.replaceCurrent(this.el.searchReplace.value)) this._doSearch(true);
+      else this.toast('没有可替换的匹配');
+    });
+    this.el.searchReplaceAll.addEventListener('click', () => {
+      if (!this.outliner) return;
+      const n = this.outliner.replaceAll(this.el.searchReplace.value);
+      if (n) { this._doSearch(true); this.toast(`已替换 ${n} 处`); }
+      else this.toast('没有可替换的匹配');
+    });
+    this.el.searchClose.addEventListener('click', () => this._closeSearch());
+
+    // 目录
+    this.el.tocBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (this.el.tocPanel.hidden) { this._renderToc(); this.el.tocPanel.hidden = false; }
+      else this.el.tocPanel.hidden = true;
+    });
+    this.el.tocClose.addEventListener('click', () => { this.el.tocPanel.hidden = true; });
+    this.el.tocList.addEventListener('click', (e) => {
+      const item = e.target.closest('.toc-item');
+      if (!item) return;
+      this._revealNode(item.dataset.id);
+      this.el.tocPanel.hidden = true;
     });
   }
 
@@ -192,6 +351,7 @@ class App {
       requestAnimationFrame(() => this.el.mindmapCanvas.focus());
     } else if (view === 'outline' && this.outliner) {
       this.outliner.setDoc(this.doc);
+      this._updateOutlineStatus();
     }
   }
 
@@ -299,11 +459,13 @@ class App {
     this.el.docTitle.value = this.doc.title;
     if (!this.outliner) {
       this.outliner = new Outliner(this.el.outlineTree, this.doc, (d, persist) => this._onChange(d, persist));
+      this.outliner._toast = (m) => this.toast(m);
     } else {
       this.outliner.setDoc(this.doc);
     }
     if (!this.mindmap) {
       this.mindmap = new Mindmap(this.el.mindmapCanvas, this.doc, (d, persist) => this._onChange(d, persist));
+      this.mindmap._toast = (m) => this.toast(m);
     } else {
       this.mindmap.setDoc(this.doc);
     }
@@ -311,9 +473,17 @@ class App {
       this.history = [JSON.stringify(this.doc.root)];
       this.redoStack = [];
     }
+    // 重置临时状态:聚焦/搜索/标签过滤/目录
+    this._clearFocus();
+    this._closeSearch();
+    this.outliner.setTagFilter(null);
+    this.el.tocPanel.hidden = true;
     this._updateUndoRedo();
     this.switchView(this.view);
     this._renderDocList();
+    this._updateOutlineStatus();
+    this._updateMindmapStatus();
+    this._renderTagBar();
   }
 
   _onChange(doc, persist) {
@@ -335,6 +505,8 @@ class App {
       this.outliner.doc = doc;
     }
     this._updateMindmapStatus();
+    this._updateOutlineStatus();
+    this._renderTagBar();
   }
 
   // ---------- 撤销 / 重做 ----------
@@ -397,25 +569,25 @@ class App {
     });
   }
 
-  /** 统一配色:根据当前视图取选中节点 id,更新 model 并同步两个视图 */
+  /** 统一配色:应用到全部选中节点,并同步两个视图 */
   _applyColorToSelected(colorKey) {
-    let id = null;
-    if (this.view === 'mindmap' && this.mindmap?.selectedId) {
-      id = this.mindmap.selectedId;
-    } else if (this.outliner?.selectedId) {
-      id = this.outliner.selectedId;
+    const ids = this._currentSelectedIds();
+    if (!ids.length) return;
+    let changed = false;
+    for (const id of ids) {
+      const node = this._findNode(this.doc.root, id);
+      if (!node) continue;
+      node.color = colorKey || null;
+      changed = true;
     }
-    if (!id) return;
-    const node = this._findNode(this.doc.root, id);
-    if (!node) return;
-    node.color = colorKey || null;
+    if (!changed) return;
     // 大纲重渲染(保持焦点)
     if (this.outliner) {
       this.outliner._saveFocus();
       this.outliner.render();
     }
     // 思维导图重绘
-    if (this.view === 'mindmap' && this.mindmap) {
+    if (this.mindmap) {
       this.mindmap.render();
       this.mindmap._applyTransform();
     }
@@ -496,25 +668,22 @@ class App {
 
   /** 应用自定义背景色(直接设 hex,不走 COLORS 预设) */
   _applyCustomBgColor(hex) {
-    let id = null;
-    if (this.view === 'mindmap' && this.mindmap?.selectedId) id = this.mindmap.selectedId;
-    else if (this.outliner?.selectedId) id = this.outliner.selectedId;
-    if (!id) return;
-    const node = this._findNode(this.doc.root, id);
-    if (!node) return;
-    // 直接用 hex 作为 color 值(不走 key 映射)
-    node.color = hex;
+    const ids = this._currentSelectedIds();
+    if (!ids.length) return;
+    let changed = false;
+    for (const id of ids) {
+      const node = this._findNode(this.doc.root, id);
+      if (!node) continue;
+      node.color = hex;
+      changed = true;
+    }
+    if (!changed) return;
     if (this.outliner) { this.outliner._saveFocus(); this.outliner.render(); }
-    if (this.view === 'mindmap' && this.mindmap) { this.mindmap.render(); this.mindmap._applyTransform(); }
+    if (this.mindmap) { this.mindmap.render(); this.mindmap._applyTransform(); }
     this._onChange(this.doc, true);
   }
   _selectedColor() {
-    let id = null;
-    if (this.view === 'mindmap' && this.mindmap?.selectedId) {
-      id = this.mindmap.selectedId;
-    } else if (this.outliner?.selectedId) {
-      id = this.outliner.selectedId;
-    }
+    const id = this._currentSelectedId();
     if (!id) return null;
     const node = this._findNode(this.doc.root, id);
     return node?.color || null;
@@ -667,12 +836,7 @@ class App {
       e.stopPropagation();
       this.el.mindmapCanvas.focus();
       if (this.mindmap?.selectedId) {
-        const f = findNode(this.doc.root, this.mindmap.selectedId);
-        if (!f?.node?.children?.length) { this.toast('该节点没有子节点'); return; }
-        f.node.collapsed = !f.node.collapsed;
-        this.mindmap.render();
-        this.mindmap._applyTransform();
-        this._onChange(this.doc, true);
+        if (!this.mindmap.toggleCollapse(this.mindmap.selectedId)) this.toast('该节点没有子节点');
       } else {
         this.toast('请先点击选中一个节点');
       }
@@ -787,10 +951,7 @@ class App {
         this.el.layoutPopover.style.right = (window.innerWidth - rect.right) + 'px';
         this.el.layoutPopover.style.left = 'auto';
         this.el.layoutPopover.hidden = false;
-        const cur = this.doc?.layout || 'right';
-        this.el.layoutPopover.querySelectorAll('.layout-item').forEach((b) => {
-          b.classList.toggle('active', b.dataset.layout === cur);
-        });
+        this._syncLayoutActive();
       } else {
         this.el.layoutPopover.hidden = true;
       }
@@ -799,9 +960,21 @@ class App {
       e.stopPropagation();
       const item = e.target.closest('.layout-item');
       if (!item) return;
-      const layout = item.dataset.layout;
-      if (this.mindmap) this.mindmap.setLayout(layout);
-      if (this.doc) { this.doc.layout = layout; this._onChange(this.doc, true); }
+      if (item.hasAttribute('data-theme')) {
+        const theme = item.dataset.theme || null;
+        if (this.doc) {
+          this.doc.theme = theme;
+          this.mindmap?.render();
+          this.mindmap?._applyTransform();
+          this._onChange(this.doc, true);
+          this._syncLayoutActive();
+        }
+      } else {
+        const layout = item.dataset.layout;
+        if (this.mindmap) this.mindmap.setLayout(layout);
+        if (this.doc) { this.doc.layout = layout; this._onChange(this.doc, true); }
+        this._syncLayoutActive();
+      }
       this.el.layoutPopover.hidden = true;
     });
     document.addEventListener('click', (e) => {
@@ -821,10 +994,16 @@ class App {
   }
 
   _updateMindmapStatus() {
-    if (this.el.mmStatus && this.mindmap) {
-      const n = this.mindmap.countNodes();
-      this.el.mmStatus.textContent = `${n} 节点`;
-    }
+    if (!this.el.mmStatus || !this.mindmap || !this.doc) return;
+    const n = this.mindmap.countNodes();
+    const s = countText(this.doc.root);
+    this.el.mmStatus.textContent = `${n} 节点 · ${s.chars} 字符`;
+  }
+
+  _updateOutlineStatus() {
+    if (!this.el.olStatus || !this.doc) return;
+    const s = countText(this.doc.root);
+    this.el.olStatus.textContent = `${s.nodes} 节点 · ${s.chars} 字符 · ${s.words} 词`;
   }
 
   _bindResize() {
@@ -835,6 +1014,219 @@ class App {
         this.mindmap._applyTransform();
       }
     }, 150));
+  }
+
+  // ---------- 富文本选区缓存 ----------
+  _saveTextSelection() {
+    this._savedTextSelection = null;
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+    const range = sel.getRangeAt(0);
+    const container = range.startContainer.nodeType === Node.TEXT_NODE
+      ? range.startContainer.parentElement : range.startContainer;
+    if (!container?.closest?.('.node-text')) return;
+    this._savedTextSelection = {
+      range: range.cloneRange(),
+      textEl: container.closest('.node-text'),
+      nodeId: container.closest('.node-text').dataset.id,
+    };
+  }
+
+  // ---------- 选中集 / 排序 ----------
+  _currentSelectedId() {
+    if (this.view === 'mindmap' && this.mindmap?.selectedId) return this.mindmap.selectedId;
+    return this.outliner?.selectedId || null;
+  }
+
+  _currentSelectedIds() {
+    if (this.view === 'mindmap' && this.mindmap) return this.mindmap.getSelectedIds();
+    return this.outliner?.getSelectedIds() || [];
+  }
+
+  _sortSelected(mode, dir) {
+    if (!this.doc) return;
+    const id = this._currentSelectedId();
+    const f = id ? findNode(this.doc.root, id) : null;
+    const parent = f ? (f.parent || this.doc.root) : this.doc.root;
+    if (!sortSiblings(parent, mode, dir)) { this.toast('同级节点不足'); return; }
+    if (this.outliner) { this.outliner._saveFocus(); this.outliner.render(); }
+    if (this.mindmap) { this.mindmap.render(); this.mindmap._applyTransform(); }
+    this._onChange(this.doc, true);
+  }
+
+  // ---------- 聚焦模式 ----------
+  _setFocusNode(node) {
+    if (!node) return;
+    this.outliner?.setViewRoot(node);
+    this.mindmap?.setViewRoot(node);
+    this.el.focusBar.hidden = false;
+    this.el.focusTitle.textContent = (node.text || '未命名').slice(0, 40) + (node.text && node.text.length > 40 ? '…' : '');
+    this.switchView(this.view);
+  }
+
+  _clearFocus() {
+    this.outliner?.setViewRoot(null);
+    this.mindmap?.setViewRoot(null);
+    this.el.focusBar.hidden = true;
+  }
+
+  // ---------- 放映 ----------
+  _openPresent() {
+    if (!this.doc) return;
+    this._presentFlat = flattenVisible(this.doc.root);
+    this._presentIndex = 0;
+    this.el.presentModal.hidden = false;
+    this._renderPresent();
+    if (this._presentKeyHandler) document.removeEventListener('keydown', this._presentKeyHandler);
+    this._presentKeyHandler = (e) => {
+      if (this.el.presentModal.hidden) return;
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key === 'Escape') this._closePresent();
+      else if (e.key === 'ArrowRight' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this._presentStep(1); }
+      else if (e.key === 'ArrowLeft') this._presentStep(-1);
+    };
+    document.addEventListener('keydown', this._presentKeyHandler);
+  }
+
+  _presentStep(delta) {
+    if (!this._presentFlat) return;
+    this._presentIndex = Math.max(0, Math.min(this._presentFlat.length - 1, this._presentIndex + delta));
+    this._renderPresent();
+  }
+
+  _renderPresent() {
+    const flat = this._presentFlat;
+    if (!flat || !flat.length) return;
+    const cur = flat[this._presentIndex];
+    const frag = document.createDocumentFragment();
+    frag.append(el('div', { class: 'p-node lvl0 cur' }, cur.node.text || ' '));
+    (cur.node.children || []).forEach((c) => {
+      frag.append(el('div', { class: 'p-node lvl1' }, c.text || ' '));
+    });
+    if (cur.node.note) frag.append(el('div', { class: 'p-note' }, cur.node.note));
+    this.el.presentContent.replaceChildren(frag);
+  }
+
+  _closePresent() {
+    this.el.presentModal.hidden = true;
+    this._presentFlat = null;
+    if (this._presentKeyHandler) {
+      document.removeEventListener('keydown', this._presentKeyHandler);
+      this._presentKeyHandler = null;
+    }
+  }
+
+  // ---------- 搜索 / 替换 ----------
+  _openSearch() {
+    this.el.searchBar.hidden = false;
+    this.el.searchInput.focus();
+    this.el.searchInput.select();
+    this._doSearch();
+  }
+
+  _closeSearch() {
+    this.el.searchBar.hidden = true;
+    this.el.searchInput.value = '';
+    this.el.searchReplace.value = '';
+    if (this.outliner) { this.outliner.setSearchQuery(''); this.outliner.setTagFilter(null); }
+    this._renderTagBar();
+  }
+
+  _doSearch(keepIndex = false) {
+    if (!this.outliner) return;
+    const q = this.el.searchInput.value;
+    const count = this.outliner.setSearchQuery(q);
+    if (count && !keepIndex) this.outliner.goToMatch(0);
+    const idx = this.outliner._searchIndex;
+    this.el.searchCount.textContent = count ? `${Math.min(idx + 1, count)}/${count}` : (q ? '无匹配' : '');
+    this._updateMindmapStatus();
+  }
+
+  _searchStep(delta) {
+    if (!this.outliner) return;
+    const id = delta > 0 ? this.outliner.nextMatch() : this.outliner.prevMatch();
+    if (!id) return;
+    const i = this.outliner._searchIndex;
+    const total = this.outliner._searchMatchIds?.length || 0;
+    this.el.searchCount.textContent = total ? `${i + 1}/${total}` : '';
+    this._updateOutlineStatus();
+  }
+
+  // ---------- 标签过滤 ----------
+  _renderTagBar() {
+    if (!this.doc || !this.el.tagBar) return;
+    const map = new Map();
+    const rec = (n) => {
+      (n.tags || []).forEach((t) => map.set(t, (map.get(t) || 0) + 1));
+      (n.children || []).forEach(rec);
+    };
+    rec(this.doc.root);
+    if (!map.size) { this.el.tagBar.hidden = true; return; }
+    this.el.tagBar.hidden = false;
+    const active = this._tagFilter;
+    this.el.tagBar.replaceChildren(...[...map.entries()].sort((a, b) => b[1] - a[1]).map(([t, c]) =>
+      el('button', {
+        class: 'ol-tag-item' + (t === active ? ' active' : ''),
+        dataset: { tag: t },
+      }, `#${t} ${c}`)
+    ));
+    this.el.tagBar.onclick = (e) => {
+      const b = e.target.closest('.ol-tag-item');
+      if (!b) return;
+      const tag = b.dataset.tag;
+      this._tagFilter = (this._tagFilter === tag) ? null : tag;
+      this.outliner?.setTagFilter(this._tagFilter);
+      this._renderTagBar();
+    };
+  }
+
+  // ---------- 目录 ----------
+  _renderToc() {
+    if (!this.doc || !this.el.tocList) return;
+    const flat = flattenVisible(this.doc.root);
+    const active = this._currentSelectedId();
+    this.el.tocList.replaceChildren(...flat.map(({ node, depth }) =>
+      el('div', {
+        class: 'toc-item' + (node.id === active ? ' active' : ''),
+        dataset: { id: node.id },
+        style: { paddingLeft: (8 + depth * 16) + 'px' },
+      }, (node.text || '空节点').slice(0, 40))
+    ));
+  }
+
+  _revealNode(id) {
+    if (this.view === 'mindmap') {
+      this.mindmap?.revealNode(id);
+    } else {
+      this.outliner?.revealNode(id);
+    }
+  }
+
+  // ---------- Popover 定位 ----------
+  _positionPopover(pop, btn) {
+    const rect = btn.getBoundingClientRect();
+    pop.style.position = 'fixed';
+    pop.style.top = (rect.bottom + 6) + 'px';
+    pop.style.right = (window.innerWidth - rect.right) + 'px';
+    pop.style.left = 'auto';
+    pop.hidden = false;
+  }
+
+  _hideAllPopovers() {
+    [this.el.fontSizePopover, this.el.fontColorPopover, this.el.layoutPopover, this.el.colorPopover, this.el.sortPopover]
+      .forEach((p) => { if (p) p.hidden = true; });
+  }
+
+  _syncLayoutActive() {
+    const cur = this.doc?.layout || 'right';
+    const theme = this.doc?.theme || '';
+    this.el.layoutPopover.querySelectorAll('.layout-item').forEach((b) => {
+      if (b.hasAttribute('data-theme')) {
+        b.classList.toggle('active', (b.dataset.theme || '') === theme);
+      } else {
+        b.classList.toggle('active', b.dataset.layout === cur);
+      }
+    });
   }
 
   // ---------- Toast ----------

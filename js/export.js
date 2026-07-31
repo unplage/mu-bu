@@ -31,7 +31,7 @@ export function validateDoc(input) {
     else if (typeof n.fontSize === 'number' && n.fontSize >= 8 && n.fontSize <= 72) fontSize = Math.round(n.fontSize);
     // fontColor: 有效 hex 或 null
     const fontColor = (typeof n.fontColor === 'string' && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(n.fontColor)) ? n.fontColor : null;
-    // spans: null 或合法数组
+    // spans: null 或合法数组(富文本属性 b/i/u/s/hl 一并归一化)
     let spans = null;
     if (Array.isArray(n.spans) && n.spans.length > 0) {
       const text = typeof n.text === 'string' ? n.text : String(n.text ?? '');
@@ -40,8 +40,36 @@ export function validateDoc(input) {
         spans = rebuilt.map((s) => ({
           text: s.text,
           color: (typeof s.color === 'string' && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(s.color)) ? s.color : null,
+          b: !!s.b,
+          i: !!s.i,
+          u: !!s.u,
+          s: !!s.s,
+          hl: (typeof s.hl === 'string' && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(s.hl)) ? s.hl : null,
         }));
       }
+    }
+    // tags: 字符串数组(去空、去#、限长)
+    let tags = [];
+    if (Array.isArray(n.tags)) {
+      tags = n.tags
+        .map((t) => String(t ?? '').replace(/^#/, '').trim())
+        .filter(Boolean)
+        .slice(0, 50);
+    }
+    // files: 图片/附件(data URL),逐项校验与限长
+    let files = null;
+    if (Array.isArray(n.files) && n.files.length > 0) {
+      files = n.files
+        .filter((f) => f && typeof f.dataUrl === 'string' && /^data:/.test(f.dataUrl))
+        .slice(0, 20)
+        .map((f) => ({
+          id: (typeof f.id === 'string' && f.id) ? f.id : 'f_' + Math.random().toString(36).slice(2, 9),
+          name: typeof f.name === 'string' ? f.name.slice(0, 120) : 'file',
+          mime: typeof f.mime === 'string' ? f.mime.slice(0, 60) : '',
+          dataUrl: f.dataUrl.slice(0, 6 * 1024 * 1024),
+          isImage: !!f.isImage,
+        }));
+      if (files.length === 0) files = null;
     }
     return {
       id,
@@ -53,6 +81,11 @@ export function validateDoc(input) {
       collapsed: !!n.collapsed,
       fontSize,
       side: [0, 1, 2].includes(n.side) ? n.side : 0,
+      createdAt: typeof n.createdAt === 'number' ? n.createdAt : Date.now(),
+      checked: n.checked ? true : null,
+      tags,
+      files,
+      link: (typeof n.link === 'string' && /^(https?:\/\/|mailto:)/i.test(n.link)) ? n.link.slice(0, 500) : null,
       children: Array.isArray(n.children) ? n.children.map(normalizeNode) : [],
     };
   };
@@ -60,6 +93,7 @@ export function validateDoc(input) {
     id: (typeof input.id === 'string' && input.id) ? input.id : 'doc_' + Date.now().toString(36),
     title: typeof input.title === 'string' ? input.title : (input.title == null ? '未命名文档' : String(input.title)),
     layout: LAYOUTS.includes(input.layout) ? input.layout : 'right',
+    theme: (typeof input.theme === 'string' && input.theme) ? input.theme : null,
     createdAt: typeof input.createdAt === 'number' ? input.createdAt : Date.now(),
     updatedAt: typeof input.updatedAt === 'number' ? input.updatedAt : Date.now(),
     root: normalizeNode(input.root),
