@@ -405,6 +405,34 @@ console.log('--- Outliner 搜索与替换 ---');
   assert(doc.root.children[0].text === '你好WORLD' && doc.root.children[1].text === 'WORLD很大', '替换结果正确');
 }
 
+console.log('--- Outliner 点击文本不重渲染(保留光标/选区) ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = 'root';
+  doc.root.children.push(createNode('a'));
+  const container = document.createElement('div');
+  const outliner = new Outliner(container, doc, () => {});
+  outliner.render();
+  const aId = doc.root.children[0].id;
+  outliner.setSelection(aId, {});
+  outliner.render();
+  const textEl = container.querySelector('.node-text[data-id="' + aId + '"]');
+  const clickOn = (el) => {
+    const ev = new window.Event('click', { bubbles: true });
+    Object.defineProperty(ev, 'target', { value: el, configurable: true });
+    el.dispatchEvent(ev);
+  };
+  // 点击已选节点的文本(选中未变化),不应触发重渲染
+  clickOn(textEl);
+  const textEl2 = container.querySelector('.node-text[data-id="' + aId + '"]');
+  assert(textEl === textEl2, '点击文本不重渲染(选中未变,光标/选区保留)');
+  // 点击未选中节点文本才重渲染
+  const rootText = container.querySelector('.node-text[data-id="' + doc.root.id + '"]');
+  clickOn(rootText);
+  const rootText2 = container.querySelector('.node-text[data-id="' + doc.root.id + '"]');
+  assert(rootText !== rootText2, '点击未选中节点触发重渲染');
+}
+
 console.log('--- Outliner 备注行 ---');
 {
   const doc = createDoc('T');

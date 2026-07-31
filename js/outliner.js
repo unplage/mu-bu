@@ -117,9 +117,13 @@ export class Outliner {
       if (e.target.closest('.node-check, .node-tag-x, .node-file-img, .node-file-chip, .node-link-chip, .node-tag-input, .node-link-input, .node-file-add')) return;
       const additive = e.ctrlKey || e.metaKey;
       const range = e.shiftKey;
-      this._saveFocus();
+      const before = this.getSelectedIds().join(',');
       this.setSelection(id, { additive, range });
-      this.render();
+      // 选中未变化(在已选节点文本内点击/拖动选字)时不要重渲染,否则丢失光标与文本选区
+      if (before !== this.getSelectedIds().join(',')) {
+        this._saveFocus();
+        this.render();
+      }
     });
     // 拖拽
     this.container.addEventListener('dragstart', (e) => this._onDragStart(e));
@@ -246,6 +250,8 @@ export class Outliner {
     const bullet = el('div', {
       class: 'bullet' + (hasChildren ? ' has-children' : ' empty') + (isCollapsed ? ' collapsed' : ''),
       dataset: { id: node.id },
+      draggable: depth !== 0 ? 'true' : 'false',
+      title: depth !== 0 ? '拖拽排序' : undefined,
     });
     const dot = el('span', { class: 'bullet-dot' });
     if (node.color) {
@@ -425,7 +431,6 @@ export class Outliner {
     const row = el('div', {
       class: 'outline-row' + (selected ? ' selected' : '') + (node.checked ? ' is-checked' : ''),
       dataset: { id: node.id, depth: String(depth) },
-      draggable: depth !== 0 ? 'true' : 'false',
     }, [checkEl, bullet, content]);
     row.style.paddingLeft = (depth * 22) + 'px';
 
@@ -1028,8 +1033,10 @@ export class Outliner {
 
   // ---------- 拖拽 ----------
   _onDragStart(e) {
+    // 仅 bullet 为拖拽手柄(整行 draggable 会阻止文本选择)
+    if (!e.target.closest('.bullet')) return;
     const row = e.target.closest('.outline-row');
-    if (!row || row.draggable === false) return;
+    if (!row) return;
     this._dragId = row.dataset.id;
     e.dataTransfer.effectAllowed = 'move';
     row.classList.add('dragging');

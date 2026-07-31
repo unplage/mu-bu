@@ -719,7 +719,7 @@ export class Mindmap {
         });
       }
 
-      // 折叠标记
+      // 折叠标记(点击展开)
       if (n.children && n.children.length > 0 && n.collapsed) {
         const badge = document.createElementNS(ns, 'circle');
         badge.setAttribute('cx', n.w + 4);
@@ -738,6 +738,13 @@ export class Mindmap {
         bn.setAttribute('font-weight', 'bold');
         bn.textContent = '+';
         grp.append(bn);
+        const expand = (ev) => {
+          ev.stopPropagation();
+          const f = findNode(this.doc.root, n.id);
+          if (f) { f.node.collapsed = false; this.onChange(this.doc, true); this.render(); this._applyTransform(); }
+        };
+        badge.addEventListener('click', expand);
+        bn.addEventListener('click', expand);
       }
 
       // 子节点数标记
@@ -764,7 +771,14 @@ export class Mindmap {
 
         if (e.shiftKey && n.children && n.children.length) {
           const f = findNode(this.doc.root, n.id);
-          if (f) { f.node.collapsed = !f.node.collapsed; this.onChange(this.doc, true); }
+          if (f) {
+            f.node.collapsed = !f.node.collapsed;
+            this.onChange(this.doc, true);
+            // 折叠/展开需重绘,否则视图不更新
+            this.render();
+            this._applyTransform();
+          }
+          return;
         }
         if (e.detail === 2 && !isMobile) { this._startEdit(n); return; }
         // 单击:增量更新选中态(Ctrl=多选),不整图重绘

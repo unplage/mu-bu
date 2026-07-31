@@ -503,6 +503,46 @@ console.log('--- Mindmap 图片渲染 ---');
   assert(h > 50, '图片使节点高度增大, got ' + h);
 }
 
+console.log('--- Mindmap Shift+点击折叠/展开 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = '根';
+  doc.root.children.push(createNode('A'));
+  doc.root.children[0].children.push(createNode('A1'));
+  const aId = doc.root.children[0].id;
+  const container = document.createElement('div');
+  const mm = new Mindmap(container, doc, () => {});
+  mm.render();
+  assert(container.querySelectorAll('.mm-node').length === 3, '初始 3 节点');
+  const ev = new window.Event('click');
+  ev.shiftKey = true;
+  container.querySelector('.mm-node[data-id="' + aId + '"]').dispatchEvent(ev);
+  assert(container.querySelectorAll('.mm-node').length === 2, 'Shift+点击折叠后 2 节点');
+  assert(doc.root.children[0].collapsed === true, 'collapsed=true');
+  const ev2 = new window.Event('click');
+  ev2.shiftKey = true;
+  container.querySelector('.mm-node[data-id="' + aId + '"]').dispatchEvent(ev2);
+  assert(container.querySelectorAll('.mm-node').length === 3, 'Shift+点击再展开恢复 3 节点');
+  assert(doc.root.children[0].collapsed === false, 'collapsed=false');
+}
+
+console.log('--- Mindmap 点击 + 徽章展开 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = '根';
+  doc.root.children.push(createNode('A'));
+  doc.root.children[0].children.push(createNode('A1'));
+  doc.root.children[0].collapsed = true;
+  const container = document.createElement('div');
+  const mm = new Mindmap(container, doc, () => {});
+  mm.render();
+  assert(container.querySelectorAll('.mm-node').length === 2, '折叠时 2 节点');
+  const badge = container.querySelector('.mm-node[data-id="' + doc.root.children[0].id + '"] circle');
+  badge.dispatchEvent(new window.Event('click'));
+  assert(doc.root.children[0].collapsed === false, '点击 + 徽章展开');
+  assert(container.querySelectorAll('.mm-node').length === 3, '展开后 3 节点');
+}
+
 console.log('--- Mindmap 复制/粘贴 ---');
 {
   const doc = createDoc('T');
