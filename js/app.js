@@ -96,7 +96,6 @@ class App {
       mindmapView: $('#mindmapView'),
       outlineTree: $('#outlineTree'),
       mindmapCanvas: $('#mindmapCanvas'),
-      colorBtn: $('#colorBtn'),
       colorPopover: $('#colorPopover'),
       colorGrid: $('#colorGrid'),
       colorClear: $('#colorClear'),
@@ -158,7 +157,6 @@ class App {
     });
     this.el.collapseAll.addEventListener('click', () => this.outliner?.collapseAll());
     this.el.expandAll.addEventListener('click', () => this.outliner?.expandAll());
-    this.el.colorBtn.addEventListener('click', (e) => this._toggleColorPopover(e, this.el.colorBtn));
     this.el.exportBtn.addEventListener('click', () => this.el.exportModal.hidden = false);
     this.el.shareBtn.addEventListener('click', () => this._share());
     this.el.deleteDoc.addEventListener('click', () => this._deleteDoc());
@@ -294,7 +292,6 @@ class App {
 
   _afterDocLoad(noPushHistory = false) {
     this.el.docTitle.value = this.doc.title;
-    this.el.colorBtn.disabled = false;
     if (!this.outliner) {
       this.outliner = new Outliner(this.el.outlineTree, this.doc, (d, persist) => this._onChange(d, persist));
     } else {
@@ -475,12 +472,19 @@ class App {
     if (this.view === 'mindmap' && this.mindmap) {
       this.mindmap.applyFontColor(hex);
     } else if (this.outliner) {
-      // 若有文本选区,逐字着色;否则节点级
-      const sel = window.getSelection();
-      if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
-        this.outliner.applySelectionColor(hex);
+      // 优先用缓存的选区( popover 打开会丢失焦点 )
+      const saved = this._savedTextSelection;
+      this._savedTextSelection = null;
+      if (saved && saved.range && !saved.range.collapsed) {
+        this.outliner.applySelectionColor(hex, saved.range, saved.textEl);
       } else {
-        this.outliner.applyFontColor(hex);
+        // 回退到实时 Selection
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
+          this.outliner.applySelectionColor(hex);
+        } else {
+          this.outliner.applyFontColor(hex);
+        }
       }
     }
   }
@@ -683,6 +687,21 @@ class App {
     this.el.mmFontColor.addEventListener('click', (e) => {
       e.stopPropagation();
       if (this.el.fontColorPopover.hidden) {
+        // 缓存当前选区( popover 打开会丢失焦点 )
+        this._savedTextSelection = null;
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
+          const range = sel.getRangeAt(0);
+          const container = range.startContainer.nodeType === Node.TEXT_NODE
+            ? range.startContainer.parentElement : range.startContainer;
+          if (container?.closest?.('.node-text')) {
+            this._savedTextSelection = {
+              range: range.cloneRange(),
+              textEl: container.closest('.node-text'),
+              nodeId: container.closest('.node-text').dataset.id,
+            };
+          }
+        }
         const rect = this.el.mmFontColor.getBoundingClientRect();
         this.el.fontColorPopover.style.position = 'fixed';
         this.el.fontColorPopover.style.top = (rect.bottom + 6) + 'px';
@@ -758,7 +777,7 @@ class App {
       if (!this.el.layoutPopover.hidden && !this.el.layoutPopover.contains(e.target) && !this.el.mmLayout.contains(e.target)) {
         this.el.layoutPopover.hidden = true;
       }
-      if (!this.el.colorPopover.hidden && !this.el.colorPopover.contains(e.target) && !this.el.colorBtn.contains(e.target) && !this.el.mmColor.contains(e.target)) {
+      if (!this.el.colorPopover.hidden && !this.el.colorPopover.contains(e.target) && !this.el.mmColor.contains(e.target)) {
         this._hideColorPopover();
       }
     });

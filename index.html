@@ -98,7 +98,7 @@ input, textarea { font-family: inherit; }
 .mindmap-canvas { position: absolute; inset: 0; cursor: grab; overflow: hidden; outline: none; touch-action: none; }
 .mindmap-canvas.panning { cursor: grabbing; }
 .mindmap-canvas svg { position: absolute; top: 0; left: 0; }
-.mm-toolbar { position: absolute; bottom: 16px; right: 16px; display: flex; flex-direction: column; gap: 2px; background: var(--bg-elev); padding: 6px; border-radius: var(--radius); box-shadow: var(--shadow); border: 1px solid var(--border); z-index: 20; }
+.mm-toolbar { position: absolute; top: 16px; right: 16px; display: flex; flex-direction: column; gap: 2px; background: var(--bg-elev); padding: 6px; border-radius: var(--radius); box-shadow: var(--shadow); border: 1px solid var(--border); z-index: 20; }
 .mm-btn { height: 30px; padding: 0 8px; border: none; background: transparent; border-radius: 4px; color: var(--text-soft); font-size: 12px; display: flex; align-items: center; justify-content: center; min-width: 32px; }
 .mm-btn:hover { background: var(--bg); color: var(--text); }
 .mm-divider { height: 1px; background: var(--border); margin: 2px 4px; }
@@ -198,7 +198,6 @@ input, textarea { font-family: inherit; }
         <button id="viewMindmap" class="seg-btn">思维导图</button>
       </div>
       <div class="toolbar-divider"></div>
-      <button id="colorBtn" class="icon-btn" title="节点配色" disabled>🎨</button>
       <button id="collapseAll" class="icon-btn" title="全部折叠">⇲</button>
       <button id="expandAll" class="icon-btn" title="全部展开">⇱</button>
       <div class="toolbar-divider"></div>

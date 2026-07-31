@@ -422,13 +422,19 @@ export class Outliner {
   }
 
   /** 对当前选中文本应用字体颜色(逐字着色) */
-  applySelectionColor(hex) {
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
-    const range = sel.getRangeAt(0);
-    const textEl = range.startContainer.nodeType === Node.TEXT_NODE
-      ? range.startContainer.parentElement
-      : range.startContainer;
+  applySelectionColor(hex, savedRange, savedTextEl) {
+    let range, textEl;
+    if (savedRange && savedTextEl) {
+      range = savedRange;
+      textEl = savedTextEl;
+    } else {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+      range = sel.getRangeAt(0);
+      textEl = range.startContainer.nodeType === Node.TEXT_NODE
+        ? range.startContainer.parentElement
+        : range.startContainer;
+    }
     if (!textEl || !textEl.closest?.('.node-text')) return;
     const id = textEl.closest('.node-text').dataset.id;
     const f = findNode(this.doc.root, id);
