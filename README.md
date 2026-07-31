@@ -59,22 +59,22 @@ cd /tmp && npm install linkedom --no-save
 
 ```
 mubu/
-├── index.html              # 应用入口
+├── index.html              # 应用入口(内联样式,加载 js/app.js 模块)
+├── mubu.html               # 与 index.html 相同,仅标题不同
 ├── manifest.json           # PWA 清单
 ├── sw.js                   # Service Worker(缓存优先)
-├── css/style.css           # 全部样式
 ├── icons/
 │   ├── icon.svg            # 矢量图标
 │   ├── icon-192.png        # PWA 图标
 │   └── icon-512.png
 ├── js/
-│   ├── app.js              # 主控制器:串联各模块、工具栏、模态框
-│   ├── utils.js            # 通用工具(id、防抖、DOM、base64、gzip、颜色调色板)
+│   ├── app.js              # 主控制器:串联各模块、工具栏、模态框、撤销/重做
+│   ├── utils.js            # 通用工具(id、防抖、DOM、base64、gzip、canvas 文本测量、颜色调色板)
 │   ├── db.js               # IndexedDB 封装(多文档 CRUD)
 │   ├── tree.js             # 树结构纯函数(遍历、增删移、缩进)
-│   ├── outliner.js         # 大纲视图:渲染、键盘交互、拖拽、配色
-│   ├── mindmap.js          # 思维导图:SVG 布局、缩放平移、编辑
-│   ├── export.js           # 导入导出(JSON/MD/OPML/TXT/PNG/SVG)
+│   ├── outliner.js         # 大纲视图:虚拟化渲染、键盘交互、拖拽、配色
+│   ├── mindmap.js          # 思维导图:SVG 布局、缩放平移、触屏手势、编辑
+│   ├── export.js           # 导入导出(JSON/MD/OPML/TXT/PNG/SVG),JSON 导入带结构校验
 │   └── share.js            # 分享链接(gzip+base64url 压缩编码)
 ├── test-core.mjs           # 核心逻辑测试
 ├── test-dom.mjs            # DOM 集成测试

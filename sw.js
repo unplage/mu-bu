@@ -1,13 +1,13 @@
 // Mubu-Lite service worker — 缓存优先,后台更新
-const VERSION = 'mubu-v6.1';
+const VERSION = 'mubu-v7.2';
 const ASSETS = [
   './',
   './index.html',
   './manifest.json',
-  './css/style.css',
   './js/app.js',
   './js/utils.js',
   './js/db.js',
+  './js/tree.js',
   './js/outliner.js',
   './js/mindmap.js',
   './js/export.js',

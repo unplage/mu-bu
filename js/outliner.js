@@ -1,24 +1,43 @@
-// outliner.js — 大纲视图渲染与编辑
+// outliner.js — 大纲视图渲染与编辑(虚拟化渲染:只渲染可视窗口内的行)
 import { el, escapeHtml, colorCss } from './utils.js';
+import { createNode } from './db.js';
 import {
   flattenVisible, findNode, insertAfter, removeNode, indent, outdent, moveNode, contains,
 } from './tree.js';
+
+const DEFAULT_ROW_H = 30;   // 未测量前的行高估算(px)
+const OVERSCAN = 6;         // 窗口上下额外渲染的行数
+const VT_THRESHOLD = 200;   // 超过该行数启用虚拟化
 
 export class Outliner {
   constructor(container, doc, onChange) {
     this.container = container;
     this.doc = doc;
-    this.onChange = onChange; // (doc) => void
+    this.onChange = onChange; // (doc, persist) => void
     this.selectedId = doc.root.id;
     this._focusId = null;
     this._focusOffset = null;
-    this._renderBound = () => this.render();
+    this._heights = new Map(); // id -> 行高 px
+    this._flat = null;         // 最近一次 render 的可见节点序列
+    this._scrollRaf = 0;
+    this._scrollBound = () => this._scheduleWindow();
     this._attach();
   }
 
   setDoc(doc) {
     this.doc = doc;
     this.render();
+  }
+
+  /** 滚动容器(应用内为 .view-outline;测试中为 container 自身) */
+  _scrollParent() {
+    return this.container.closest('.view-outline') || this.container.parentElement || this.container;
+  }
+
+  _vtEnabled() {
+    if (!this._flat || this._flat.length < VT_THRESHOLD) return false;
+    const sp = this._scrollParent();
+    return !!sp && (sp.clientHeight || 0) > 0;
   }
 
   _attach() {
@@ -29,8 +48,10 @@ export class Outliner {
       const id = row.dataset.id;
       if (e.target.closest('.bullet')) {
         this._toggleCollapse(id);
-      } else {
+      } else if (this.selectedId !== id) {
+        this._saveFocus();
         this.selectedId = id;
+        this.render();
       }
     });
     // 拖拽
@@ -38,19 +59,71 @@ export class Outliner {
     this.container.addEventListener('dragover', (e) => this._onDragOver(e));
     this.container.addEventListener('drop', (e) => this._onDrop(e));
     this.container.addEventListener('dragend', () => this._clearDrop());
+    this._scrollParent().addEventListener('scroll', this._scrollBound);
   }
 
   // ---------- 渲染 ----------
   render() {
-    const flat = flattenVisible(this.doc.root);
-    const frag = document.createDocumentFragment();
-    for (const { node, depth } of flat) {
-      frag.append(this._renderNode(node, depth));
+    this._flat = flattenVisible(this.doc.root);
+    if (this._vtEnabled()) {
+      this._renderWindow();
+    } else {
+      this._renderRows(0, this._flat.length, 0, 0);
     }
-    this.container.replaceChildren(frag);
+  }
+
+  _scheduleWindow() {
+    cancelAnimationFrame(this._scrollRaf);
+    this._scrollRaf = requestAnimationFrame(() => {
+      if (this._vtEnabled()) this._renderWindow();
+    });
+  }
+
+  /** 渲染窗口内行:顶部/底部占位块保证滚动高度正确 */
+  _renderWindow() {
+    const flat = this._flat;
+    const sp = this._scrollParent();
+    const vh = sp.clientHeight || 0;
+    const st = sp.scrollTop || 0;
+    const n = flat.length;
+    const h = (i) => this._heights.get(flat[i].node.id) || DEFAULT_ROW_H;
+    // 前缀累计高度
+    const tops = new Array(n);
+    let total = 0;
+    for (let i = 0; i < n; i++) { tops[i] = total; total += h(i); }
+    // 视口窗口
+    let start = 0;
+    while (start < n && tops[start] < st - OVERSCAN * DEFAULT_ROW_H) start++;
+    let end = start;
+    while (end < n && tops[end] < st + vh + OVERSCAN * DEFAULT_ROW_H) end++;
+    // 焦点行必须渲染(否则焦点丢失)
     if (this._focusId) {
-      this._restoreFocus();
+      const fi = flat.findIndex((x) => x.node.id === this._focusId);
+      if (fi >= 0) {
+        if (fi < start) start = fi;
+        if (fi >= end) end = fi + 1;
+      }
     }
+    if (start > 0) start--;
+    if (start >= end) end = start + 1;
+    const lastH = h(end - 1);
+    this._renderRows(start, end, tops[start], total - tops[end - 1] - lastH);
+  }
+
+  _renderRows(start, end, spacerTop, spacerBottom) {
+    const flat = this._flat;
+    const frag = document.createDocumentFragment();
+    if (spacerTop > 0) frag.append(el('div', { class: 'vt-spacer', style: { height: spacerTop + 'px' } }));
+    for (let i = start; i < end; i++) {
+      const { node, depth } = flat[i];
+      const row = this._renderNode(node, depth);
+      frag.append(row);
+      const h = row.offsetHeight || 0;
+      if (h > 0) this._heights.set(node.id, h);
+    }
+    if (spacerBottom > 0) frag.append(el('div', { class: 'vt-spacer', style: { height: spacerBottom + 'px' } }));
+    this.container.replaceChildren(frag);
+    if (this._focusId) this._restoreFocus();
   }
 
   _renderNode(node, depth) {
@@ -70,7 +143,7 @@ export class Outliner {
     bullet.append(dot);
 
     const text = el('div', {
-      class: 'node-text',
+      class: 'node-text' + (!node.text ? ' is-empty' : ''),
       contenteditable: 'true',
       spellcheck: 'false',
       dataset: { id: node.id, placeholder: '输入内容…' },
@@ -81,21 +154,38 @@ export class Outliner {
     const row = el('div', {
       class: 'outline-row' + (selected ? ' selected' : ''),
       dataset: { id: node.id, depth: String(depth) },
-      draggable: 'true',
+      draggable: depth !== 0 ? 'true' : 'false',
     }, [bullet, body]);
     row.style.paddingLeft = (depth * 22) + 'px';
 
-    // 输入处理:仅更新模型,不重渲染
+    // 输入处理:仅更新模型,不重渲染;顺带刷新行高缓存
     text.addEventListener('input', () => {
       const f = findNode(this.doc.root, node.id);
       if (f) f.node.text = textToModel(text);
+      text.classList.toggle('is-empty', text.textContent === '');
+      const h = row.offsetHeight || 0;
+      if (h > 0) this._heights.set(node.id, h);
       this._emitChange(false);
     });
-    // 阻止 contenteditable 换行产生 div
+    // 阻止 contenteditable 换行产生 div,手动插入保留换行
     text.addEventListener('paste', (e) => {
       e.preventDefault();
-      const txt = (e.clipboardData || window.clipboardData).getData('text');
-      document.execCommand('insertText', false, txt);
+      const txt = (e.clipboardData || window.clipboardData).getData('text/plain');
+      const sel = window.getSelection();
+      if (!sel.rangeCount) return;
+      const range = sel.getRangeAt(0);
+      range.deleteContents();
+      const lines = txt.split('\n');
+      const frag = document.createDocumentFragment();
+      lines.forEach((line, i) => {
+        if (i > 0) frag.appendChild(document.createElement('br'));
+        frag.appendChild(document.createTextNode(line));
+      });
+      range.insertNode(frag);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      text.dispatchEvent(new Event('input', { bubbles: true }));
     });
 
     return row;
@@ -104,8 +194,10 @@ export class Outliner {
   // ---------- 焦点管理 ----------
   _saveFocus() {
     const sel = window.getSelection();
-    if (!sel.rangeCount) return;
-    const textEl = sel.anchorNode?.parentElement?.closest('.node-text');
+    if (!sel.rangeCount || !sel.anchorNode) return;
+    const textEl = sel.anchorNode.nodeType === Node.TEXT_NODE
+      ? sel.anchorNode.parentElement?.closest('.node-text')
+      : sel.anchorNode.closest?.('.node-text');
     if (!textEl) return;
     this._focusId = textEl.dataset.id;
     this._focusOffset = caretOffset(textEl);
@@ -126,10 +218,25 @@ export class Outliner {
     this._focusId = id;
     this._focusOffset = offset;
     this.render();
+    // 虚拟化时把焦点行滚动进视口
+    if (this._vtEnabled() && this._flat) {
+      const sp = this._scrollParent();
+      const i = this._flat.findIndex((x) => x.node.id === id);
+      if (i >= 0) {
+        let top = 0;
+        for (let j = 0; j < i; j++) top += this._heights.get(this._flat[j].node.id) || DEFAULT_ROW_H;
+        const vh = sp.clientHeight || 0;
+        if (top < (sp.scrollTop || 0) || top > (sp.scrollTop || 0) + vh - 40) {
+          sp.scrollTop = Math.max(0, top - 40);
+        }
+      }
+    }
   }
 
   // ---------- 键盘 ----------
   _onKey(e) {
+    // 中文输入法组合期(选词)不做结构操作:Enter 上屏、Backspace 删字等
+    if (e.isComposing || e.keyCode === 229) return;
     const textEl = e.target.closest('.node-text');
     if (!textEl) return;
     const id = textEl.dataset.id;
@@ -144,7 +251,7 @@ export class Outliner {
       // 在光标处分割文本
       const split = splitAtCaret(textEl);
       node.text = split.before;
-      const newNode = makeNode(split.after);
+      const newNode = createNode(split.after);
       if (parent) insertAfter(parent, index, newNode);
       else node.children.unshift(newNode); // root 无 parent
       this.selectedId = newNode.id;
@@ -176,12 +283,27 @@ export class Outliner {
 
     if (e.key === 'Backspace' && caretAtStart(textEl) && node.text === '') {
       e.preventDefault();
-      // 删除空节点,聚焦前一个兄弟或父节点
-      const target = previousVisibleId(this.doc.root, id) || parent?.id;
-      if (parent) removeNode(parent, index);
-      else return; // root 不可删
-      this.selectedId = target;
-      this._focusNode(target, 'end');
+      if (!parent) return; // root 不可删
+      let target;
+      if (node.children && node.children.length > 0) {
+        // 子节点提升到祖父级,避免删除丢数据
+        const gpInfo = findNode(this.doc.root, parent.id);
+        const grandparent = gpInfo ? gpInfo.parent : null;
+        if (grandparent) {
+          const pIdx = grandparent.children.indexOf(parent);
+          grandparent.children.splice(pIdx + 1, 0, ...node.children);
+        } else {
+          this.doc.root.children.splice(index + 1, 0, ...node.children);
+        }
+        removeNode(parent, index);
+        target = parent.id;
+        this._focusNode(target, 'end');
+      } else {
+        target = previousVisibleId(this.doc.root, id) || parent?.id;
+        removeNode(parent, index);
+        this.selectedId = target;
+        this._focusNode(target, 'end');
+      }
       this._emitChange(true);
       return;
     }
@@ -294,10 +416,39 @@ export class Outliner {
     this._emitChange(true);
   }
 
+  // ---------- 移动端按钮 ----------
+  indentSelected() {
+    const f = findNode(this.doc.root, this.selectedId);
+    if (!f || !f.parent) return false;
+    const { parent, index } = f;
+    if (indent(parent, index)) {
+      this._saveFocus();
+      this.render();
+      this._emitChange(true);
+      return true;
+    }
+    return false;
+  }
+
+  outdentSelected() {
+    const f = findNode(this.doc.root, this.selectedId);
+    if (!f || !f.parent) return false;
+    const { parent, index } = f;
+    const gpInfo = findNode(this.doc.root, parent.id);
+    const grandparent = gpInfo ? gpInfo.parent : null;
+    if (outdent(parent, index, grandparent)) {
+      this._saveFocus();
+      this.render();
+      this._emitChange(true);
+      return true;
+    }
+    return false;
+  }
+
   // ---------- 拖拽 ----------
   _onDragStart(e) {
     const row = e.target.closest('.outline-row');
-    if (!row) return;
+    if (!row || row.draggable === false) return;
     this._dragId = row.dataset.id;
     e.dataTransfer.effectAllowed = 'move';
     row.classList.add('dragging');
@@ -369,17 +520,6 @@ export class Outliner {
 function* walkGen(node) {
   yield node;
   if (node.children) for (const c of node.children) yield* walkGen(c);
-}
-
-function makeNode(text = '') {
-  return {
-    id: 'n_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
-    text,
-    note: '',
-    color: null,
-    collapsed: false,
-    children: [],
-  };
 }
 
 function previousVisibleId(root, id) {

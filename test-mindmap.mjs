@@ -141,8 +141,32 @@ console.log('--- Mindmap 字号 ---');
   mm.selectedId = doc.root.children[0].id;
   mm.applyFontSize('L');
   assert(doc.root.children[0].fontSize === 'L', 'A 字号设为 L');
+  const textsL = container.querySelectorAll('.mm-node-text');
+  assert(textsL[1].getAttribute('font-size') === '18', 'applyFontSize 后立即重绘,A 字号 18px, got ' + textsL[1].getAttribute('font-size'));
+  const rectsL = container.querySelectorAll('.mm-node-rect');
+  assert(rectsL[1].getAttribute('stroke-width') === '3', '重绘后 A 仍保持选中态');
   mm.applyFontSize('S');
   assert(doc.root.children[0].fontSize === 'S', 'A 字号设为 S');
+  const textsS = container.querySelectorAll('.mm-node-text');
+  assert(textsS[1].getAttribute('font-size') === '12', 'applyFontSize 后立即重绘,A 字号 12px, got ' + textsS[1].getAttribute('font-size'));
+}
+
+console.log('--- Mindmap 布局字段不污染文档模型 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = '根';
+  doc.root.children.push(createNode('A'));
+  doc.root.children[0].children.push(createNode('A1'));
+  const container = document.createElement('div');
+  const mm = new Mindmap(container, doc, () => {});
+  mm.render();
+  const check = (node, label) => {
+    assert(node.x === undefined && node.y === undefined, label + ' 无 x/y');
+    assert(node._w === undefined && node._h === undefined && node._lines === undefined && node._sh === undefined, label + ' 无测量字段');
+  };
+  check(doc.root, 'root');
+  check(doc.root.children[0], 'A');
+  check(doc.root.children[0].children[0], 'A1');
 }
 
 console.log('--- Mindmap 选中态边框 ---');
@@ -200,6 +224,83 @@ console.log('--- Mindmap 字号影响节点尺寸 ---');
   const smallW = parseFloat(rects[1].getAttribute('width'));
   const largeW = parseFloat(rects[2].getAttribute('width'));
   assert(largeW >= smallW, '大字号节点宽度 >= 小字号 (' + largeW + ' >= ' + smallW + ')');
+}
+
+console.log('--- Mindmap 多布局 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = '根';
+  for (let i = 0; i < 3; i++) {
+    const c = createNode('子' + i);
+    c.children.push(createNode('孙'));
+    doc.root.children.push(c);
+  }
+  const container = document.createElement('div');
+  const mm = new Mindmap(container, doc, () => {});
+  const pos = (id) => {
+    const g = container.querySelector('.mm-node[data-id="' + id + '"]');
+    const t = g.getAttribute('transform');
+    const m = t.match(/translate\(([-\d.]+),([-\d.]+)\)/);
+    return { x: parseFloat(m[1]), y: parseFloat(m[2]) };
+  };
+  const rectW = (id) => parseFloat(container.querySelector('.mm-node[data-id="' + id + '"] .mm-node-rect').getAttribute('width'));
+
+  // 向右(默认)
+  mm.render();
+  const r0 = pos(doc.root.id);
+  assert(r0.x === 0, '向右布局 root x=0');
+  assert(pos(doc.root.children[0].id).x >= rectW(doc.root.id) + 49, '向右布局子节点在父右侧');
+  const rightEdges = container.querySelectorAll('.mm-edge');
+  assert(rightEdges[0].getAttribute('d').startsWith('M'), '向右布局连线有效');
+
+  // 向下
+  mm.setLayout('down');
+  assert(doc.root.children.length === 3, '向下布局渲染 3 个子节点');
+  const rY = pos(doc.root.id);
+  const c0Y = pos(doc.root.children[0].id);
+  const c1Y = pos(doc.root.children[1].id);
+  assert(c0Y.y > rY.y, '向下布局子节点 y > 父 y (' + c0Y.y + ' > ' + rY.y + ')');
+  assert(c0Y.x !== c1Y.x, '向下布局兄弟横向排开 (' + c0Y.x + ' != ' + c1Y.x + ')');
+  // 连线应为垂直贝塞尔
+  const downEdges = container.querySelectorAll('.mm-edge');
+  assert(downEdges[0].getAttribute('d').includes('C'), '向下布局连线含贝塞尔');
+
+  // 径向
+  mm.setLayout('radial');
+  const rR = pos(doc.root.id);
+  assert(Math.abs(rR.x) < 2 && Math.abs(rR.y) < 2, '径向布局 root 在原点, got (' + rR.x + ',' + rR.y + ')');
+  const c0R = pos(doc.root.children[0].id);
+  assert(Math.hypot(c0R.x, c0R.y) > 40, '径向布局子节点离中心 > 40');
+  // 连线应为斜向
+  const radEdges = container.querySelectorAll('.mm-edge');
+  assert(radEdges[0].getAttribute('d').includes('C'), '径向布局连线含贝塞尔');
+
+  // 左右交错:子节点分布两侧
+  mm.setLayout('leftright');
+  const rootX = pos(doc.root.id).x;
+  const xs = doc.root.children.map((c) => pos(c.id).x);
+  assert(xs.some((x) => x < rootX) && xs.some((x) => x > rootX), '左右交错子节点在两侧, xs=' + xs.join(','));
+
+  // side 强制
+  doc.root.children[0].side = 1;
+  doc.root.children[2].side = 2;
+  mm.render();
+  assert(pos(doc.root.children[0].id).x < rootX, 'side=1 强制左侧');
+  assert(pos(doc.root.children[2].id).x > rootX, 'side=2 强制右侧');
+  // 左侧连线从父左边缘出发
+  const leEdges = container.querySelectorAll('.mm-edge');
+  const rootW = rectW(doc.root.id);
+  assert(leEdges[0].getAttribute('d').startsWith('M' + rootX + ','), '左侧连线起点为父左边缘');
+}
+
+console.log('--- Mindmap 默认 layout 字段 ---');
+{
+  const doc = createDoc('T');
+  assert(doc.layout === 'right', 'createDoc 默认 layout=right');
+  doc.layout = 'down';
+  const container = document.createElement('div');
+  const mm = new Mindmap(container, doc, () => {});
+  assert(mm.layout === 'down', 'Mindmap 读取 doc.layout');
 }
 
 console.log(`\n=== Mindmap 测试: ${pass} passed, ${fail} failed ===`);

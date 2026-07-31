@@ -36,6 +36,7 @@ export function createDoc(title = '未命名文档') {
   return {
     id: uid('doc'),
     title,
+    layout: 'right',
     createdAt: now,
     updatedAt: now,
     root: {
@@ -45,6 +46,8 @@ export function createDoc(title = '未命名文档') {
       color: null,
       collapsed: false,
       children: [],
+      fontSize: 'M',
+      side: 0,
     },
   };
 }
@@ -58,6 +61,8 @@ export function createNode(text = '') {
     color: null,
     collapsed: false,
     children: [],
+    fontSize: 'M',
+    side: 0,
   };
 }
 

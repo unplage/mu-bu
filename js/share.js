@@ -1,13 +1,16 @@
 // share.js — 通过压缩编码生成只读分享链接(无需服务器)
 import { gzipCompress, gzipDecompress, base64urlEncode, base64urlDecode } from './utils.js';
 
-const LINK_LIMIT = 12000; // URL hash 长度上限,超过则提示用文件分享
+const LINK_LIMIT = 8000; // URL hash 长度上限,超过则提示用文件分享
+
+const LAYOUTS = ['right', 'down', 'radial', 'leftright'];
 
 /** 将文档编码为分享 hash */
 export async function encodeShare(doc) {
   // 精简:只保留必要字段
   const slim = {
     t: doc.title,
+    l: (doc.layout && doc.layout !== 'right') ? doc.layout : undefined,
     r: trimNode(doc.root),
   };
   const json = JSON.stringify(slim);
@@ -20,6 +23,8 @@ function trimNode(n) {
     x: n.text,
     c: n.color || undefined,
     k: n.collapsed ? 1 : undefined,
+    f: (n.fontSize && n.fontSize !== 'M') ? n.fontSize : undefined,
+    d: (n.side && n.side !== 0) ? n.side : undefined,
     h: (n.children && n.children.length) ? n.children.map(trimNode) : undefined,
   };
 }
@@ -32,6 +37,7 @@ export async function decodeShare(hash) {
   return {
     id: 'doc_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
     title: slim.t || '分享文档',
+    layout: LAYOUTS.includes(slim.l) ? slim.l : 'right',
     createdAt: Date.now(),
     updatedAt: Date.now(),
     root: restoreNode(slim.r),
@@ -46,6 +52,8 @@ function restoreNode(s) {
     color: s.c || null,
     collapsed: !!s.k,
     children: s.h ? s.h.map(restoreNode) : [],
+    fontSize: ['S', 'M', 'L'].includes(s.f) ? s.f : 'M',
+    side: [0, 1, 2].includes(s.d) ? s.d : 0,
   };
 }
 

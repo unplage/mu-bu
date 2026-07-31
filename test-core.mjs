@@ -144,12 +144,12 @@ console.log('--- share encode/decode roundtrip ---');
   const doc = {
     id: 'doc_x', title: '分享测试', createdAt: 1, updatedAt: 2,
     root: {
-      id: 'r', text: '根', note: '', color: 'red', collapsed: false,
+      id: 'r', text: '根', note: '', color: 'red', collapsed: false, fontSize: 'L',
       children: [
-        { id: 'c1', text: '子1', note: '', color: null, collapsed: false, children: [] },
+        { id: 'c1', text: '子1', note: '', color: null, collapsed: false, children: [], fontSize: 'S' },
         { id: 'c2', text: '子2\n第二行', note: '', color: 'blue', collapsed: true, children: [
-          { id: 'c2a', text: '孙', note: '', color: null, collapsed: false, children: [] },
-        ]},
+          { id: 'c2a', text: '孙', note: '', color: null, collapsed: false, children: [], fontSize: 'M' },
+        ], fontSize: 'M' },
       ],
     },
   };
@@ -159,6 +159,8 @@ console.log('--- share encode/decode roundtrip ---');
   assert(decoded.title === '分享测试', 'title decoded');
   assert(decoded.root.text === '根', 'root text decoded');
   assert(decoded.root.color === 'red', 'root color decoded');
+  assert(decoded.root.fontSize === 'L', 'root fontSize preserved');
+  assert(decoded.root.children[0].fontSize === 'S', 'child1 fontSize preserved');
   assert(decoded.root.children.length === 2, '2 children');
   assert(decoded.root.children[0].text === '子1', 'child1 text');
   assert(decoded.root.children[1].text === '子2\n第二行', 'multiline text preserved');
@@ -178,6 +180,45 @@ console.log('--- share URL detection ---');
   const h = Share.getShareHashFromURL();
   assert(h === 'abc123', 'extracted share hash');
   Object.defineProperty(globalThis, 'location', { value: orig, configurable: true });
+}
+
+console.log('--- validateDoc 归一化 layout/side ---');
+{
+  const v = Export.validateDoc({ title: 'T', layout: 'radial', root: { text: 'x', side: 2 } });
+  assert(v.layout === 'radial', 'validateDoc 保留 layout');
+  assert(v.root.side === 2, 'validateDoc 保留 side');
+  const v2 = Export.validateDoc({ title: 'T', layout: 'weird', root: { text: 'x', side: 9 } });
+  assert(v2.layout === 'right', 'validateDoc layout 非法归 right');
+  assert(v2.root.side === 0, 'validateDoc side 非法归 0');
+  const v3 = Export.validateDoc({ title: 'T', root: { text: 'x' } });
+  assert(v3.layout === 'right', 'validateDoc 缺 layout 归 right');
+  assert(v3.root.side === 0, 'validateDoc 缺 side 归 0');
+}
+
+console.log('--- share 往返保留 layout/side ---');
+{
+  const doc = {
+    id: 'doc_x', title: '布局分享', layout: 'radial', createdAt: 1, updatedAt: 2,
+    root: {
+      id: 'r', text: '根', note: '', color: 'red', collapsed: false, fontSize: 'L', side: 0,
+      children: [
+        { id: 'c1', text: '左', note: '', color: null, collapsed: false, children: [], fontSize: 'M', side: 1 },
+        { id: 'c2', text: '右', note: '', color: 'blue', collapsed: false, children: [], fontSize: 'M', side: 2 },
+        { id: 'c3', text: '自动', note: '', color: null, collapsed: false, children: [], fontSize: 'M', side: 0 },
+      ],
+    },
+  };
+  const hash = await Share.encodeShare(doc);
+  const decoded = await Share.decodeShare(hash);
+  assert(decoded.layout === 'radial', 'layout 往返 radial');
+  assert(decoded.root.children[0].side === 1, 'side=1 往返');
+  assert(decoded.root.children[1].side === 2, 'side=2 往返');
+  assert(decoded.root.children[2].side === 0, 'side=0 默认往返');
+  // 默认 layout 不编码
+  doc.layout = 'right';
+  const hash2 = await Share.encodeShare(doc);
+  const decoded2 = await Share.decodeShare(hash2);
+  assert(decoded2.layout === 'right', '默认 layout 不编码');
 }
 
 console.log(`\n=== ${pass} passed, ${fail} failed ===`);

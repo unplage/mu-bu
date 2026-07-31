@@ -4,7 +4,7 @@ import { Mindmap } from './mindmap.js';
 import * as DB from './db.js';
 import * as Export from './export.js';
 import * as Share from './share.js';
-import { el, COLORS, colorCss, formatDate, debounce, download } from './utils.js';
+import { el, COLORS, formatDate, debounce, isMobile } from './utils.js';
 import { findNode } from './tree.js';
 
 const $ = (s) => document.querySelector(s);
@@ -16,7 +16,10 @@ class App {
     this.view = 'outline';
     this.outliner = null;
     this.mindmap = null;
-    this._saveDebounced = debounce((d) => DB.saveDoc(d), 400);
+    this.history = [];
+    this.redoStack = [];
+    this._saveDebounced = debounce((d) => this._persist(d), 400);
+    this._pushHistoryDebounced = debounce((d) => this._pushHistory(d, true), 800);
     this._init();
   }
 
@@ -25,10 +28,20 @@ class App {
     this._bindToolbar();
     this._bindSidebar();
     this._bindModals();
-    this._bindColorPopover();
     this._bindMindmapControls();
     this._bindResize();
     this._initColorGrid();
+    this.el.mmHint.textContent = isMobile
+      ? '双击编辑 · 双指缩放 · 拖拽平移 · 单击选中'
+      : 'Tab 添加子节点 · Enter 添加兄弟 · 双击编辑 · Shift+点击折叠 · 拖拽平移 · 滚轮缩放';
+
+    // 防抖保存的兜底冲刷:切后台/关闭页面前把最后一次编辑落盘
+    const flushSave = () => { if (this.doc) this._saveDebounced.flush(); };
+    window.addEventListener('pagehide', flushSave);
+    window.addEventListener('beforeunload', flushSave);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flushSave();
+    });
 
     await this.refreshDocs();
 
@@ -53,6 +66,19 @@ class App {
     this._registerSW();
   }
 
+  /** 保存并刷新侧边栏;失败给出可见提示(避免静默丢数据) */
+  _persist(doc) {
+    DB.saveDoc(doc)
+      .then(() => this.refreshDocs())
+      .catch((e) => this.toast('保存失败: ' + (e?.message || e)));
+  }
+
+  _registerSW() {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('SW 注册失败', e));
+    }
+  }
+
   _cacheEls() {
     this.el = {
       docList: $('#docList'),
@@ -63,6 +89,7 @@ class App {
       openSidebar: $('#openSidebar'),
       closeSidebar: $('#closeSidebar'),
       sidebar: $('#sidebar'),
+      sidebarOverlay: $('#sidebarOverlay'),
       viewOutline: $('#viewOutline'),
       viewMindmap: $('#viewMindmap'),
       outlineView: $('#outlineView'),
@@ -75,6 +102,8 @@ class App {
       colorClear: $('#colorClear'),
       collapseAll: $('#collapseAll'),
       expandAll: $('#expandAll'),
+      undoBtn: $('#undoBtn'),
+      redoBtn: $('#redoBtn'),
       exportBtn: $('#exportBtn'),
       exportModal: $('#exportModal'),
       shareBtn: $('#shareBtn'),
@@ -93,9 +122,14 @@ class App {
       mmAddSibling: $('#mmAddSibling'),
       mmDelete: $('#mmDelete'),
       mmFontSize: $('#mmFontSize'),
+      mmColor: $('#mmColor'),
+      mmLayout: $('#mmLayout'),
       mmHint: $('#mmHint'),
       mmStatus: $('#mmStatus'),
       fontSizePopover: $('#fontSizePopover'),
+      layoutPopover: $('#layoutPopover'),
+      indentBtn: $('#indentBtn'),
+      outdentBtn: $('#outdentBtn'),
     };
   }
 
@@ -111,14 +145,25 @@ class App {
     });
     this.el.collapseAll.addEventListener('click', () => this.outliner?.collapseAll());
     this.el.expandAll.addEventListener('click', () => this.outliner?.expandAll());
-    this.el.colorBtn.addEventListener('click', (e) => this._toggleColorPopover(e));
-    this.el.exportBtn.addEventListener('click', () => this._openModal(this.el.exportModal));
+    this.el.colorBtn.addEventListener('click', (e) => this._toggleColorPopover(e, this.el.colorBtn));
+    this.el.exportBtn.addEventListener('click', () => this.el.exportModal.hidden = false);
     this.el.shareBtn.addEventListener('click', () => this._share());
     this.el.deleteDoc.addEventListener('click', () => this._deleteDoc());
+    this.el.undoBtn.addEventListener('click', () => this._undo());
+    this.el.redoBtn.addEventListener('click', () => this._redo());
+    this.el.indentBtn.addEventListener('click', () => { if (this.outliner) this.outliner.indentSelected(); });
+    this.el.outdentBtn.addEventListener('click', () => { if (this.outliner) this.outliner.outdentSelected(); });
+
+    document.addEventListener('keydown', (e) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) this._redo(); else this._undo();
+      }
+    });
   }
 
   switchView(view) {
-    const prev = this.view;
     this.view = view;
     this.el.viewOutline.classList.toggle('active', view === 'outline');
     this.el.viewMindmap.classList.toggle('active', view === 'mindmap');
@@ -137,8 +182,13 @@ class App {
   // ---------- 侧边栏 ----------
   _bindSidebar() {
     this.el.newDoc.addEventListener('click', () => this.newDoc());
-    this.el.openSidebar.addEventListener('click', () => this.el.sidebar.classList.add('open'));
-    this.el.closeSidebar.addEventListener('click', () => this.el.sidebar.classList.remove('open'));
+    const toggleSidebar = (open) => {
+      this.el.sidebar.classList.toggle('open', open);
+      this.el.sidebarOverlay.classList.toggle('show', open);
+    };
+    this.el.openSidebar.addEventListener('click', () => toggleSidebar(true));
+    this.el.closeSidebar.addEventListener('click', () => toggleSidebar(false));
+    this.el.sidebarOverlay.addEventListener('click', () => toggleSidebar(false));
     this.el.importFile.addEventListener('change', (e) => this._import(e.target.files[0]));
     this.el.searchDocs.addEventListener('input', () => this._renderDocList());
     this.el.docList.addEventListener('click', (e) => {
@@ -174,6 +224,11 @@ class App {
     this._afterDocLoad();
     this.el.docTitle.focus();
     this.el.docTitle.select();
+    this.el.searchDocs.value = '';
+    this._renderDocList();
+    if (window.innerWidth <= 760 || window.matchMedia('(pointer: coarse)').matches) {
+      this.el.sidebar.classList.remove('open');
+    }
   }
 
   async openDoc(id) {
@@ -181,7 +236,11 @@ class App {
     if (!doc) return;
     this.doc = doc;
     this._afterDocLoad();
-    this.el.sidebar.classList.remove('open');
+    this.el.searchDocs.value = '';
+    this._renderDocList();
+    if (window.innerWidth <= 760 || window.matchMedia('(pointer: coarse)').matches) {
+      this.el.sidebar.classList.remove('open');
+    }
   }
 
   async _deleteDoc() {
@@ -201,7 +260,7 @@ class App {
       const text = await file.text();
       let docs = [];
       if (file.name.endsWith('.json')) {
-        docs = Export.importJSON(text);
+        docs = Export.importJSON(text); // 内部做结构校验与归一化
       } else if (file.name.endsWith('.opml') || file.name.endsWith('.xml')) {
         docs = [Export.importOPML(text)];
       } else {
@@ -220,7 +279,7 @@ class App {
     }
   }
 
-  _afterDocLoad(readonly = false) {
+  _afterDocLoad(noPushHistory = false) {
     this.el.docTitle.value = this.doc.title;
     this.el.colorBtn.disabled = false;
     if (!this.outliner) {
@@ -233,6 +292,11 @@ class App {
     } else {
       this.mindmap.setDoc(this.doc);
     }
+    if (!noPushHistory) {
+      this.history = [JSON.stringify(this.doc.root)];
+      this.redoStack = [];
+    }
+    this._updateUndoRedo();
     this.switchView(this.view);
     this._renderDocList();
   }
@@ -240,9 +304,12 @@ class App {
   _onChange(doc, persist) {
     this.doc = doc;
     if (persist) {
-      DB.saveDoc(doc).then(() => this.refreshDocs());
+      this._pushHistoryDebounced.cancel();
+      this._pushHistory(doc);
+      this._persist(doc);
     } else {
       this._saveDebounced(doc);
+      this._pushHistoryDebounced(doc);
     }
     // 当前视图的非编辑组件同步模型(避免切回时丢失改动)
     if (this.view === 'mindmap' && this.mindmap && !this.mindmap.editingId) {
@@ -253,6 +320,44 @@ class App {
       this.outliner.doc = doc;
     }
     this._updateMindmapStatus();
+  }
+
+  // ---------- 撤销 / 重做 ----------
+  _pushHistory(doc = this.doc, isDebounced = false) {
+    const last = this.history[this.history.length - 1];
+    const current = JSON.stringify(doc.root);
+    if (last === current) return;
+    this.history.push(current);
+    if (this.history.length > 50) this.history.shift();
+    if (!isDebounced) this.redoStack = [];
+    this._updateUndoRedo();
+  }
+
+  _undo() {
+    if (this.history.length <= 1) return;
+    this.redoStack.push(this.history.pop());
+    const root = JSON.parse(this.history[this.history.length - 1]);
+    this.doc.root = root;
+    this.outliner.setDoc(this.doc);
+    this.mindmap.setDoc(this.doc);
+    this._persist(this.doc);
+    this._updateUndoRedo();
+  }
+
+  _redo() {
+    if (this.redoStack.length === 0) return;
+    const state = this.redoStack.pop();
+    this.history.push(state);
+    this.doc.root = JSON.parse(state);
+    this.outliner.setDoc(this.doc);
+    this.mindmap.setDoc(this.doc);
+    this._persist(this.doc);
+    this._updateUndoRedo();
+  }
+
+  _updateUndoRedo() {
+    this.el.undoBtn.disabled = this.history.length <= 1;
+    this.el.redoBtn.disabled = this.redoStack.length === 0;
   }
 
   // ---------- 配色 ----------
@@ -274,11 +379,6 @@ class App {
     this.el.colorClear.addEventListener('click', () => {
       this._applyColorToSelected(null);
       this._hideColorPopover();
-    });
-    document.addEventListener('click', (e) => {
-      if (!this.el.colorPopover.hidden && !this.el.colorPopover.contains(e.target) && e.target !== this.el.colorBtn) {
-        this._hideColorPopover();
-      }
     });
   }
 
@@ -304,14 +404,17 @@ class App {
       this.mindmap.render();
       this.mindmap._applyTransform();
     }
-    DB.saveDoc(this.doc).then(() => this.refreshDocs());
+    this._onChange(this.doc, true);
   }
 
-  _toggleColorPopover(e) {
+  _toggleColorPopover(e, btn) {
+    e.stopPropagation();
     if (this.el.colorPopover.hidden) {
-      const rect = this.el.colorBtn.getBoundingClientRect();
+      const rect = btn.getBoundingClientRect();
+      this.el.colorPopover.style.position = 'fixed';
       this.el.colorPopover.style.top = (rect.bottom + 6) + 'px';
-      this.el.colorPopover.style.left = (rect.left - 90) + 'px';
+      this.el.colorPopover.style.left = Math.max(0, rect.left - 90) + 'px';
+      this.el.colorPopover.style.right = 'auto';
       this.el.colorPopover.hidden = false;
       const cur = this._selectedColor();
       this.el.colorGrid.querySelectorAll('.color-swatch').forEach((s) => {
@@ -361,8 +464,6 @@ class App {
     });
   }
 
-  _openModal(modal) { modal.hidden = false; }
-
   async _doExport(type) {
     if (!this.doc) return;
     try {
@@ -383,10 +484,10 @@ class App {
   }
 
   async _exportPNG() {
-    // 确保思维导图已渲染
+    // 确保思维导图已渲染(双 rAF 等布局稳定)
     const wasOutline = this.view === 'outline';
     if (wasOutline) this.switchView('mindmap');
-    await new Promise((r) => requestAnimationFrame(r));
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     const svg = this.el.mindmapCanvas.querySelector('svg');
     if (!svg) throw new Error('思维导图未就绪');
     await Export.exportPNG(svg, this.doc.title);
@@ -407,10 +508,14 @@ class App {
     this.el.shareNote.textContent = '';
     try {
       const { link, length, limit } = await Share.buildShareLink(this.doc);
-      this.el.shareLink.value = link;
-      if (length > limit * 0.85) {
+      if (length > limit) {
+        this.el.shareLink.value = '';
+        this.el.shareNote.innerHTML = '⚠ 文档过大,超出链接生成上限。请使用下方「下载 .mubu 文件分享」。';
+      } else if (length > limit * 0.85) {
+        this.el.shareLink.value = link;
         this.el.shareNote.textContent = '⚠ 文档较大,接近链接长度上限。建议改用「下载 .mubu 文件分享」。';
       } else {
+        this.el.shareLink.value = link;
         this.el.shareNote.textContent = `链接已压缩(${length} 字符),接收者打开即可查看。`;
       }
     } catch (e) {
@@ -421,32 +526,40 @@ class App {
 
   // ---------- 思维导图控制 ----------
   _bindMindmapControls() {
-    this.el.mmZoomIn.addEventListener('click', () => this.mindmap?.zoomBy(1.2));
-    this.el.mmZoomOut.addEventListener('click', () => this.mindmap?.zoomBy(1 / 1.2));
-    this.el.mmZoomFit.addEventListener('click', () => this.mindmap?.fit());
-    this.el.mmZoomReset.addEventListener('click', () => this.mindmap?.resetZoom());
+    this.el.mmZoomIn.addEventListener('click', (e) => { e.stopPropagation(); this.mindmap?.zoomBy(1.2); });
+    this.el.mmZoomOut.addEventListener('click', (e) => { e.stopPropagation(); this.mindmap?.zoomBy(1 / 1.2); });
+    this.el.mmZoomFit.addEventListener('click', (e) => { e.stopPropagation(); this.mindmap?.fit(); });
+    this.el.mmZoomReset.addEventListener('click', (e) => { e.stopPropagation(); this.mindmap?.resetZoom(); });
     this.el.mmAddChild.addEventListener('click', (e) => {
       e.stopPropagation();
-      this.mindmap?.container?.focus();
+      this.el.mindmapCanvas.focus();
       if (this.mindmap?.selectedId) {
-        const f = this.doc && findNode(this.doc.root, this.mindmap.selectedId);
+        const f = findNode(this.doc.root, this.mindmap.selectedId);
         if (f) this.mindmap._addChild(f.node);
+      } else {
+        this.toast('请先点击选中一个节点');
       }
     });
     this.el.mmAddSibling.addEventListener('click', (e) => {
       e.stopPropagation();
-      this.mindmap?.container?.focus();
+      this.el.mindmapCanvas.focus();
       if (this.mindmap?.selectedId) {
-        const f = this.doc && findNode(this.doc.root, this.mindmap.selectedId);
+        const f = findNode(this.doc.root, this.mindmap.selectedId);
         if (f?.parent) this.mindmap._addSibling(f.parent, f.index);
+        else this.toast('根节点无兄弟');
+      } else {
+        this.toast('请先点击选中一个节点');
       }
     });
     this.el.mmDelete.addEventListener('click', (e) => {
       e.stopPropagation();
-      this.mindmap?.container?.focus();
+      this.el.mindmapCanvas.focus();
       if (this.mindmap?.selectedId) {
-        const f = this.doc && findNode(this.doc.root, this.mindmap.selectedId);
+        const f = findNode(this.doc.root, this.mindmap.selectedId);
         if (f?.parent) this.mindmap._delete(f.parent, f.index);
+        else this.toast('根节点不可删除');
+      } else {
+        this.toast('请先点击选中一个节点');
       }
     });
     // 字号选择(用 fixed 定位避免坐标系问题)
@@ -468,15 +581,53 @@ class App {
         this.el.fontSizePopover.hidden = true;
       }
     });
+    this.el.mmColor.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this._toggleColorPopover(e, this.el.mmColor);
+    });
     this.el.fontSizePopover.addEventListener('click', (e) => {
+      e.stopPropagation();
       const item = e.target.closest('.font-size-item');
       if (!item) return;
       this.mindmap?.applyFontSize(item.dataset.size);
       this.el.fontSizePopover.hidden = true;
     });
+    // 布局选择
+    this.el.mmLayout.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (this.el.layoutPopover.hidden) {
+        const rect = this.el.mmLayout.getBoundingClientRect();
+        this.el.layoutPopover.style.position = 'fixed';
+        this.el.layoutPopover.style.top = (rect.bottom + 6) + 'px';
+        this.el.layoutPopover.style.right = (window.innerWidth - rect.right) + 'px';
+        this.el.layoutPopover.style.left = 'auto';
+        this.el.layoutPopover.hidden = false;
+        const cur = this.doc?.layout || 'right';
+        this.el.layoutPopover.querySelectorAll('.layout-item').forEach((b) => {
+          b.classList.toggle('active', b.dataset.layout === cur);
+        });
+      } else {
+        this.el.layoutPopover.hidden = true;
+      }
+    });
+    this.el.layoutPopover.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const item = e.target.closest('.layout-item');
+      if (!item) return;
+      const layout = item.dataset.layout;
+      if (this.mindmap) this.mindmap.setLayout(layout);
+      if (this.doc) { this.doc.layout = layout; this._onChange(this.doc, true); }
+      this.el.layoutPopover.hidden = true;
+    });
     document.addEventListener('click', (e) => {
       if (!this.el.fontSizePopover.hidden && !this.el.fontSizePopover.contains(e.target) && !this.el.mmFontSize.contains(e.target)) {
         this.el.fontSizePopover.hidden = true;
+      }
+      if (!this.el.layoutPopover.hidden && !this.el.layoutPopover.contains(e.target) && !this.el.mmLayout.contains(e.target)) {
+        this.el.layoutPopover.hidden = true;
+      }
+      if (!this.el.colorPopover.hidden && !this.el.colorPopover.contains(e.target) && !this.el.colorBtn.contains(e.target) && !this.el.mmColor.contains(e.target)) {
+        this._hideColorPopover();
       }
     });
   }
@@ -498,18 +649,12 @@ class App {
     }, 150));
   }
 
-  // ---------- Service Worker ----------
-  _registerSW() {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('SW 注册失败', e));
-    }
-  }
-
   // ---------- Toast ----------
   toast(msg) {
     this.el.toast.textContent = msg;
     this.el.toast.hidden = false;
-    requestAnimationFrame(() => this.el.toast.classList.add('show'));
+    void this.el.toast.offsetWidth;
+    this.el.toast.classList.add('show');
     clearTimeout(this._toastT);
     this._toastT = setTimeout(() => {
       this.el.toast.classList.remove('show');
