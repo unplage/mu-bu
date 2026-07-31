@@ -91,6 +91,22 @@ export const COLORS = [
   { key: 'blue', name: '蓝', hex: '#4f8cf0' },
   { key: 'purple', name: '紫', hex: '#9b7bd8' },
   { key: 'pink', name: '粉', hex: '#ec7cad' },
+  { key: 'beige', name: '米', hex: '#f5e6c8' },
+  { key: 'lavender', name: '薰', hex: '#c8b6e2' },
+  { key: 'mint', name: '薄荷', hex: '#a8e6cf' },
+  { key: 'brown', name: '棕', hex: '#a0785a' },
+  { key: 'gray', name: '灰', hex: '#9aa1ab' },
+  { key: 'deepRed', name: '深红', hex: '#c0392b' },
+  { key: 'deepBlue', name: '深蓝', hex: '#2c3e80' },
+  { key: 'deepGreen', name: '深绿', hex: '#27ae60' },
+];
+/** 字体颜色预设 */
+export const FONT_COLORS = [
+  '#2b333b', '#666666', '#999999', '#ffffff',
+  '#c0392b', '#e74c3c', '#e67e22', '#f39c12',
+  '#27ae60', '#2ecc71', '#2980b9', '#3498db',
+  '#8e44ad', '#9b59b6', '#e91e63', '#ff5722',
+  '#795548', '#607d8b', '#00bcd4', '#ff9800',
 ];
 export function colorCss(key) {
   const c = COLORS.find((x) => x.key === key);
@@ -107,9 +123,21 @@ export function isLightColor(hex) {
 /** 彩色节点浅色填充 */
 export function shade(colorKey) {
   if (!colorKey) return '#ffffff';
+  // 直接 hex 颜色:生成浅色版本
+  if (colorKey.startsWith('#') && colorKey.length === 7) {
+    const r = parseInt(colorKey.slice(1, 3), 16);
+    const g = parseInt(colorKey.slice(3, 5), 16);
+    const b = parseInt(colorKey.slice(5, 7), 16);
+    const lr = Math.round(r + (255 - r) * 0.85);
+    const lg = Math.round(g + (255 - g) * 0.85);
+    const lb = Math.round(b + (255 - b) * 0.85);
+    return `#${lr.toString(16).padStart(2, '0')}${lg.toString(16).padStart(2, '0')}${lb.toString(16).padStart(2, '0')}`;
+  }
   const map = {
     red: '#fbe7e6', orange: '#fdeede', yellow: '#fdf6dd', green: '#e6f5e6',
     cyan: '#e0f4f6', blue: '#e8f1fe', purple: '#efe9fb', pink: '#fbe9f1',
+    beige: '#faf3e6', lavender: '#f0ebf8', mint: '#e8f8f0', brown: '#f2ebe4',
+    gray: '#f0f1f3', deepRed: '#fbe7e6', deepBlue: '#e8ecf8', deepGreen: '#e6f5e6',
   };
   return map[colorKey] || '#ffffff';
 }

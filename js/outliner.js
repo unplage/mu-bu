@@ -148,7 +148,7 @@ export class Outliner {
       spellcheck: 'false',
       dataset: { id: node.id, placeholder: '输入内容…' },
     });
-    text.innerHTML = textToHtml(node.text);
+    text.innerHTML = textToHtml(node.text, node.spans, node.fontColor);
 
     const body = el('div', { class: 'node-body' }, [text]);
     const row = el('div', {
@@ -161,7 +161,10 @@ export class Outliner {
     // 输入处理:仅更新模型,不重渲染;顺带刷新行高缓存
     text.addEventListener('input', () => {
       const f = findNode(this.doc.root, node.id);
-      if (f) f.node.text = textToModel(text);
+      if (f) {
+        f.node.text = textToModel(text);
+        f.node.spans = spansFromDom(text);
+      }
       text.classList.toggle('is-empty', text.textContent === '');
       const h = row.offsetHeight || 0;
       if (h > 0) this._heights.set(node.id, h);
@@ -248,10 +251,15 @@ export class Outliner {
 
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      // 在光标处分割文本
+      // 在光标处分割文本和 spans
       const split = splitAtCaret(textEl);
+      const oldSpans = node.spans;
       node.text = split.before;
+      node.spans = splitSpansAtOffset(oldSpans, split.before.length, node.text);
       const newNode = createNode(split.after);
+      // 新节点继承父节点 fontColor; spans 从分割点继承
+      newNode.fontColor = node.fontColor;
+      newNode.spans = splitSpansAtOffset(oldSpans, split.before.length, split.after, true);
       if (parent) insertAfter(parent, index, newNode);
       else node.children.unshift(newNode); // root 无 parent
       this.selectedId = newNode.id;
@@ -402,6 +410,59 @@ export class Outliner {
     this._emitChange(true);
   }
 
+  /** 设置选中节点的默认字体颜色 */
+  applyFontColor(hex) {
+    const f = findNode(this.doc.root, this.selectedId);
+    if (!f) return;
+    f.node.fontColor = hex || null;
+    f.node.spans = null;
+    this._saveFocus();
+    this.render();
+    this._emitChange(true);
+  }
+
+  /** 对当前选中文本应用字体颜色(逐字着色) */
+  applySelectionColor(hex) {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+    const range = sel.getRangeAt(0);
+    const textEl = range.startContainer.nodeType === Node.TEXT_NODE
+      ? range.startContainer.parentElement
+      : range.startContainer;
+    if (!textEl || !textEl.closest?.('.node-text')) return;
+    const id = textEl.closest('.node-text').dataset.id;
+    const f = findNode(this.doc.root, id);
+    if (!f) return;
+    // 计算选区在节点文本中的偏移
+    const preRange = document.createRange();
+    preRange.selectNodeContents(textEl);
+    preRange.setEnd(range.startContainer, range.startOffset);
+    const startOffset = preRange.toString().length;
+    const selectedLen = range.toString().length;
+    // 重建 spans 并着色
+    const oldSpans = f.node.spans || [{ text: f.node.text, color: null }];
+    const newSpans = [];
+    let pos = 0;
+    for (const sp of oldSpans) {
+      const spEnd = pos + sp.text.length;
+      if (spEnd <= startOffset || pos >= startOffset + selectedLen) {
+        newSpans.push({ text: sp.text, color: sp.color });
+      } else {
+        const before = sp.text.slice(0, Math.max(0, startOffset - pos));
+        const mid = sp.text.slice(Math.max(0, startOffset - pos), Math.min(sp.text.length, startOffset + selectedLen - pos));
+        const after = sp.text.slice(Math.min(sp.text.length, startOffset + selectedLen - pos));
+        if (before) newSpans.push({ text: before, color: sp.color });
+        if (mid) newSpans.push({ text: mid, color: hex });
+        if (after) newSpans.push({ text: after, color: sp.color });
+      }
+      pos = spEnd;
+    }
+    f.node.spans = newSpans.some((s) => s.color) ? newSpans : null;
+    this._saveFocus();
+    this.render();
+    this._emitChange(true);
+  }
+
   collapseAll() {
     for (const n of walkGen(this.doc.root)) {
       if (n === this.doc.root) continue; // 不折叠根节点(文档本身)
@@ -535,20 +596,92 @@ function nextVisibleId(root, id) {
 
 // ---------- 光标与文本 ----------
 function textToModel(textEl) {
-  // 将 <br> 与 <div> 转为 \n
+  // 将 <br> 与 <div> 转为 \n;span 标签也提取文本
   let out = '';
   textEl.childNodes.forEach((n, i) => {
     if (n.nodeType === Node.TEXT_NODE) out += n.textContent;
     else if (n.nodeName === 'BR') out += '\n';
     else if (n.nodeName === 'DIV') out += (i ? '\n' : '') + n.textContent;
+    else if (n.nodeName === 'SPAN') out += n.textContent;
   });
   return out;
 }
 
-function textToHtml(text) {
+function textToHtml(text, spans, fontColor) {
   if (!text) return '';
-  const lines = escapeHtml(text).split('\n');
-  return lines.map((l, i) => i === 0 ? l : '<br>' + l).join('');
+  const hasSpans = Array.isArray(spans) && spans.length > 0 && spans.some((s) => s.color);
+  if (!hasSpans) {
+    // 无逐字颜色:纯文本 + <br>
+    const lines = escapeHtml(text).split('\n');
+    return lines.map((l, i) => i === 0 ? l : '<br>' + l).join('');
+  }
+  // 有 spans:按 \n 拆行,每行内按 span 片段渲染 <span style="color:...">
+  const result = [];
+  let pos = 0;
+  for (let lineIdx = 0; ; lineIdx++) {
+    const nlIdx = text.indexOf('\n', pos);
+    const lineEnd = nlIdx === -1 ? text.length : nlIdx;
+    const lineText = text.slice(pos, lineEnd);
+    if (lineIdx > 0) result.push('<br>');
+    // 渲染该行的 spans
+    let linePos = 0;
+    for (const sp of spans) {
+      const spStart = linePos;
+      const spEnd = linePos + sp.text.length;
+      if (spEnd <= pos || spStart >= lineEnd) { linePos = spEnd; continue; }
+      const clipStart = Math.max(spStart, pos) - spStart;
+      const clipEnd = Math.min(spEnd, lineEnd) - spStart;
+      const segment = sp.text.slice(clipStart, clipEnd);
+      if (segment) {
+        if (sp.color) result.push(`<span style="color:${sp.color}">${escapeHtml(segment)}</span>`);
+        else result.push(escapeHtml(segment));
+      }
+      linePos = spEnd;
+    }
+    if (nlIdx === -1) break;
+    pos = nlIdx + 1;
+  }
+  return result.join('');
+}
+
+/** 从 contenteditable DOM 重建 spans 数组 */
+function spansFromDom(textEl) {
+  const spans = [];
+  let hasColor = false;
+  textEl.childNodes.forEach((n) => {
+    if (n.nodeType === Node.TEXT_NODE) {
+      if (n.textContent) spans.push({ text: n.textContent, color: null });
+    } else if (n.nodeName === 'BR') {
+      spans.push({ text: '\n', color: null });
+    } else if (n.nodeName === 'DIV') {
+      if (spans.length > 0) spans.push({ text: '\n', color: null });
+      if (n.textContent) spans.push({ text: n.textContent, color: null });
+    } else if (n.nodeName === 'SPAN') {
+      const color = n.style.color || null;
+      if (color) hasColor = true;
+      if (n.textContent) spans.push({ text: n.textContent, color });
+    }
+  });
+  return hasColor && spans.length > 0 ? spans : null;
+}
+
+/** 在指定偏移量处拆分 spans 数组 */
+function splitSpansAtOffset(spans, offset, newText, isAfter) {
+  if (!spans || spans.length === 0) return null;
+  const result = [];
+  let pos = 0;
+  for (const sp of spans) {
+    const spEnd = pos + sp.text.length;
+    if (spEnd <= offset) { pos = spEnd; continue; }
+    if (pos >= offset) { result.push({ text: sp.text, color: sp.color }); pos = spEnd; continue; }
+    // span 跨越分割点
+    const beforeText = sp.text.slice(0, offset - pos);
+    const afterText = sp.text.slice(offset - pos);
+    if (!isAfter && beforeText) result.push({ text: beforeText, color: sp.color });
+    if (isAfter && afterText) result.push({ text: afterText, color: sp.color });
+    pos = spEnd;
+  }
+  return result.length > 0 && result.some((s) => s.color) ? result : null;
 }
 
 function caretOffset(el) {

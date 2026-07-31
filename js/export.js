@@ -1,8 +1,10 @@
 // export.js — 导入导出(JSON / Markdown / OPML / TXT / PNG / SVG)
 import { download, escapeHtml } from './utils.js';
 
-const NODE_COLORS = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple', 'pink'];
+const NODE_COLORS = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple', 'pink',
+  'beige', 'lavender', 'mint', 'brown', 'gray', 'deepRed', 'deepBlue', 'deepGreen'];
 const FONT_SIZES = ['S', 'M', 'L'];
+const FONT_SIZE_MAP = { S: 12, M: 14, L: 18 };
 const LAYOUTS = ['right', 'down', 'radial', 'leftright'];
 const MAX_NODES = 50000;
 
@@ -23,13 +25,33 @@ export function validateDoc(input) {
     if (!n || typeof n !== 'object') throw new Error('节点必须是对象');
     if (++counter.n > MAX_NODES) throw new Error(`文档节点数超过 ${MAX_NODES} 上限`);
     const id = (typeof n.id === 'string' && n.id) ? n.id : 'n_' + Math.random().toString(36).slice(2, 9);
+    // fontSize: S/M/L 字符串 → 对应数字; 数字 8-72 保留; 其他 → 14
+    let fontSize = 14;
+    if (FONT_SIZES.includes(n.fontSize)) fontSize = FONT_SIZE_MAP[n.fontSize];
+    else if (typeof n.fontSize === 'number' && n.fontSize >= 8 && n.fontSize <= 72) fontSize = Math.round(n.fontSize);
+    // fontColor: 有效 hex 或 null
+    const fontColor = (typeof n.fontColor === 'string' && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(n.fontColor)) ? n.fontColor : null;
+    // spans: null 或合法数组
+    let spans = null;
+    if (Array.isArray(n.spans) && n.spans.length > 0) {
+      const text = typeof n.text === 'string' ? n.text : String(n.text ?? '');
+      const rebuilt = n.spans.filter((s) => s && typeof s === 'object' && typeof s.text === 'string');
+      if (rebuilt.map((s) => s.text).join('') === text) {
+        spans = rebuilt.map((s) => ({
+          text: s.text,
+          color: (typeof s.color === 'string' && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(s.color)) ? s.color : null,
+        }));
+      }
+    }
     return {
       id,
       text: typeof n.text === 'string' ? n.text : String(n.text ?? ''),
       note: typeof n.note === 'string' ? n.note : '',
       color: NODE_COLORS.includes(n.color) ? n.color : null,
+      fontColor,
+      spans,
       collapsed: !!n.collapsed,
-      fontSize: FONT_SIZES.includes(n.fontSize) ? n.fontSize : 'M',
+      fontSize,
       side: [0, 1, 2].includes(n.side) ? n.side : 0,
       children: Array.isArray(n.children) ? n.children.map(normalizeNode) : [],
     };
@@ -136,7 +158,10 @@ export function importOPML(text) {
 function serializeSVG(svgEl) {
   const clone = svgEl.cloneNode(true);
   clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-  // 依据渲染内容计算导出尺寸(运行时 SVG 是 100% 尺寸无 viewBox,直接导出会得到空白图)
+  // 修复:移除 clone 中 <g> 的 transform,确保 viewBox 坐标与渲染一致
+  const gClone = clone.querySelector('#mm-root');
+  if (gClone) gClone.removeAttribute('transform');
+  // 依据原始 SVG 的 <g> 计算 bbox(未变换坐标 = viewBox 坐标)
   const g = svgEl.querySelector('#mm-root');
   if (g && typeof g.getBBox === 'function') {
     try {

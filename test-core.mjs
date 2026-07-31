@@ -195,6 +195,47 @@ console.log('--- validateDoc 归一化 layout/side ---');
   assert(v3.root.side === 0, 'validateDoc 缺 side 归 0');
 }
 
+console.log('--- validateDoc 归一化 fontColor/spans/fontSize ---');
+{
+  // fontColor
+  const v = Export.validateDoc({ title: 'T', root: { text: 'x', fontColor: '#ff0000' } });
+  assert(v.root.fontColor === '#ff0000', '保留 fontColor');
+  const v2 = Export.validateDoc({ title: 'T', root: { text: 'x', fontColor: 'invalid' } });
+  assert(v2.root.fontColor === null, '非法 fontColor 归 null');
+  // spans
+  const v3 = Export.validateDoc({ title: 'T', root: { text: 'Hi', spans: [{ text: 'H', color: '#f00' }, { text: 'i', color: null }] } });
+  assert(v3.root.spans.length === 2, '保留合法 spans');
+  assert(v3.root.spans[0].color === '#f00', 'span color 保留');
+  const v4 = Export.validateDoc({ title: 'T', root: { text: 'Hi', spans: [{ text: 'X', color: '#f00' }] } });
+  assert(v4.root.spans === null, 'spans 不匹配 text 时丢弃');
+  // fontSize 数字
+  const v5 = Export.validateDoc({ title: 'T', root: { text: 'x', fontSize: 24 } });
+  assert(v5.root.fontSize === 24, '数字 fontSize 保留');
+  const v6 = Export.validateDoc({ title: 'T', root: { text: 'x', fontSize: 99 } });
+  assert(v6.root.fontSize === 14, '超范围 fontSize 归 14');
+  const v7 = Export.validateDoc({ title: 'T', root: { text: 'x', fontSize: 'S' } });
+  assert(v7.root.fontSize === 12, 'S → 12');
+  const v8 = Export.validateDoc({ title: 'T', root: { text: 'x', fontSize: 'L' } });
+  assert(v8.root.fontSize === 18, 'L → 18');
+}
+
+console.log('--- share 往返保留 fontColor/spans ---');
+{
+  const doc = {
+    id: 'doc_x', title: '颜色分享', createdAt: 1, updatedAt: 2,
+    root: {
+      id: 'r', text: 'Hi', note: '', color: null, fontColor: '#ff0000',
+      spans: [{ text: 'H', color: '#0000ff' }, { text: 'i', color: null }],
+      collapsed: false, fontSize: 'M', side: 0, children: [],
+    },
+  };
+  const hash = await Share.encodeShare(doc);
+  const decoded = await Share.decodeShare(hash);
+  assert(decoded.root.fontColor === '#ff0000', 'fontColor 往返');
+  assert(decoded.root.spans.length === 2, 'spans 往返');
+  assert(decoded.root.spans[0].color === '#0000ff', 'span color 往返');
+}
+
 console.log('--- share 往返保留 layout/side ---');
 {
   const doc = {

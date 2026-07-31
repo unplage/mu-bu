@@ -22,9 +22,14 @@ function trimNode(n) {
   return {
     x: n.text,
     c: n.color || undefined,
+    o: n.fontColor || undefined,
     k: n.collapsed ? 1 : undefined,
     f: (n.fontSize && n.fontSize !== 'M') ? n.fontSize : undefined,
     d: (n.side && n.side !== 0) ? n.side : undefined,
+    s: (Array.isArray(n.spans) && n.spans.length > 1) ? n.spans.map((sp) => ({
+      x: sp.text,
+      c: sp.color || undefined,
+    })) : undefined,
     h: (n.children && n.children.length) ? n.children.map(trimNode) : undefined,
   };
 }
@@ -45,11 +50,22 @@ export async function decodeShare(hash) {
 }
 
 function restoreNode(s) {
+  const text = s.x || '';
+  let spans = null;
+  if (Array.isArray(s.s) && s.s.length > 0) {
+    const parsed = s.s.map((sp) => ({
+      text: sp.x || '',
+      color: (typeof sp.c === 'string' && /^#[0-9a-fA-F]{6}$/.test(sp.c)) ? sp.c : null,
+    }));
+    if (parsed.map((sp) => sp.text).join('') === text) spans = parsed;
+  }
   return {
     id: 'n_' + Math.random().toString(36).slice(2, 9),
-    text: s.x || '',
+    text,
     note: '',
     color: s.c || null,
+    fontColor: (typeof s.o === 'string' && /^#[0-9a-fA-F]{6}$/.test(s.o)) ? s.o : null,
+    spans,
     collapsed: !!s.k,
     children: s.h ? s.h.map(restoreNode) : [],
     fontSize: ['S', 'M', 'L'].includes(s.f) ? s.f : 'M',

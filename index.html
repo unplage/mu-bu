@@ -127,7 +127,7 @@ input, textarea { font-family: inherit; }
 .popover { position: fixed; z-index: 200; background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 12px; width: 220px; }
 .popover[hidden] { display: none; }
 .popover-title { font-size: 12px; color: var(--text-faint); margin-bottom: 8px; }
-.color-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-bottom: 8px; }
+.color-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 8px; }
 .color-swatch { width: 32px; height: 32px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; transition: 0.1s; }
 .color-swatch:hover { transform: scale(1.1); }
 .color-swatch.active { border-color: var(--text); }
@@ -226,7 +226,8 @@ input, textarea { font-family: inherit; }
         <button id="mmDelete" class="mm-btn" title="删除 (Backspace)">🗑 删除</button>
         <div class="mm-divider"></div>
         <button id="mmFontSize" class="mm-btn" title="字号">字号</button>
-        <button id="mmColor" class="mm-btn" title="颜色">🎨 颜色</button>
+        <button id="mmFontColor" class="mm-btn" title="字体颜色">字色</button>
+        <button id="mmColor" class="mm-btn" title="背景色">背景</button>
         <button id="mmLayout" class="mm-btn" title="布局">布局</button>
         <div class="mm-divider"></div>
         <button id="mmZoomIn" class="mm-btn">＋</button>
@@ -245,12 +246,40 @@ input, textarea { font-family: inherit; }
 </div>
 
 <div id="fontSizePopover" class="popover" hidden>
-  <div class="popover-title">字号</div>
-  <div class="font-size-grid">
-    <button class="font-size-item" data-size="S">小 (12px)</button>
-    <button class="font-size-item" data-size="M">中 (14px)</button>
-    <button class="font-size-item" data-size="L">大 (18px)</button>
+  <div class="popover-title">字号 (8-72px)</div>
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+    <input id="fontSizeRange" type="range" min="8" max="72" value="14" style="flex:1">
+    <input id="fontSizeNumber" type="number" min="8" max="72" value="14" style="width:56px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:13px">
   </div>
+  <div style="display:flex;gap:4px;flex-wrap:wrap">
+    <button class="font-size-item" data-size="10">10</button>
+    <button class="font-size-item" data-size="12">12</button>
+    <button class="font-size-item" data-size="14">14</button>
+    <button class="font-size-item" data-size="16">16</button>
+    <button class="font-size-item" data-size="18">18</button>
+    <button class="font-size-item" data-size="24">24</button>
+    <button class="font-size-item" data-size="32">32</button>
+  </div>
+</div>
+
+<div id="fontColorPopover" class="popover" hidden>
+  <div class="popover-title">字体颜色</div>
+  <div class="color-grid" id="fontColorGrid" style="grid-template-columns:repeat(5,1fr)"></div>
+  <div style="display:flex;gap:4px;margin-top:8px">
+    <input id="fontColorHex" type="text" placeholder="#000000" maxlength="7" style="flex:1;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px">
+    <button id="fontColorApply" class="btn btn-ghost" style="font-size:12px">应用</button>
+  </div>
+  <button id="fontColorClear" class="btn btn-ghost btn-block" style="margin-top:4px;font-size:12px">清除(自动)</button>
+</div>
+
+<div id="colorPopover" class="popover" hidden>
+  <div class="popover-title">节点背景色</div>
+  <div class="color-grid" id="colorGrid"></div>
+  <div style="display:flex;gap:4px;margin-top:8px">
+    <input id="colorHexInput" type="text" placeholder="#ffffff" maxlength="7" style="flex:1;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px">
+    <button id="colorHexApply" class="btn btn-ghost" style="font-size:12px">应用</button>
+  </div>
+  <button id="colorClear" class="btn btn-ghost btn-block" style="margin-top:4px;font-size:12px">清除颜色</button>
 </div>
 
 <div id="layoutPopover" class="popover" hidden>

@@ -3,7 +3,7 @@ import { el, colorCss, getTextWidth, isLightColor, shade, isMobile } from './uti
 import { findNode } from './tree.js';
 
 const FONT_SIZES = { S: 12, M: 14, L: 18 };
-const LINE_HEIGHTS = { S: 16, M: 20, L: 26 };
+const LINE_HEIGHT_RATIO = 1.4;
 const NODE_PAD_X = 12;
 const NODE_PAD_Y = 8;
 const NODE_GAP_Y = 10;
@@ -186,7 +186,7 @@ export class Mindmap {
 
   _addChild(parent) {
     const inheritedSize = parent.fontSize || 'M';
-    const newNode = makeNode('新节点', inheritedSize, parent.color || null);
+    const newNode = makeNode('新节点', inheritedSize, parent.color || null, parent.fontColor || null);
     if (!parent.children) parent.children = [];
     parent.children.push(newNode);
     parent.collapsed = false;
@@ -198,7 +198,7 @@ export class Mindmap {
 
   _addSibling(parent, index) {
     const inheritedSize = parent.fontSize || 'M';
-    const newNode = makeNode('新节点', inheritedSize, parent.color || null);
+    const newNode = makeNode('新节点', inheritedSize, parent.color || null, parent.fontColor || null);
     parent.children.splice(index + 1, 0, newNode);
     this.selectedId = newNode.id;
     this.onChange(this.doc, true);
@@ -338,7 +338,7 @@ export class Mindmap {
       path.setAttribute('d', edgePath(this.layout, e.from, e.to));
       path.setAttribute('class', 'mm-edge');
       path.setAttribute('fill', 'none');
-      path.setAttribute('stroke', e.to.color ? colorCss(e.to.color) : '#c4c9d0');
+      path.setAttribute('stroke', e.to.color ? (e.to.color.startsWith('#') ? e.to.color : colorCss(e.to.color)) : '#c4c9d0');
       path.setAttribute('stroke-width', '1.5');
       g.append(path);
     }
@@ -349,9 +349,9 @@ export class Mindmap {
       grp.setAttribute('class', 'mm-node');
       grp.setAttribute('transform', `translate(${n.x},${n.y})`);
       grp.dataset.id = n.id;
-      const fontSize = FONT_SIZES[n.fontSize || 'M'] || FONT_SIZES.M;
-      const lineH = LINE_HEIGHTS[n.fontSize || 'M'] || LINE_HEIGHTS.M;
-      const rectColor = n.color ? colorCss(n.color) : null;
+      const fontSize = typeof n.fontSize === 'number' ? n.fontSize : (FONT_SIZES[n.fontSize] || 14);
+      const lineH = Math.round(fontSize * LINE_HEIGHT_RATIO);
+      const rectColor = n.color ? (n.color.startsWith('#') ? n.color : colorCss(n.color)) : null;
       const isRoot = n.id === this.doc.root.id;
 
       // 编辑态
@@ -401,8 +401,9 @@ export class Mindmap {
       rect.setAttribute('height', n.h);
       rect.setAttribute('rx', 6);
       if (n.color) {
+        const hex = n.color.startsWith('#') ? n.color : colorCss(n.color);
         rect.setAttribute('fill', shade(n.color));
-        rect.setAttribute('stroke', rectColor);
+        rect.setAttribute('stroke', hex);
         rect.setAttribute('stroke-width', '2');
       } else if (isRoot) {
         rect.setAttribute('fill', '#4f8cf0');
@@ -423,21 +424,35 @@ export class Mindmap {
       const lines = n.lines;
       const textH = lines.length * lineH;
       const startY = (n.h - textH) / 2 + fontSize - 3;
-      let textColor = '#2b333b';
-      if (isRoot && !n.color) {
-        textColor = '#fff';
-      } else if (n.color) {
-        textColor = isLightColor(rectColor) ? '#2b333b' : '#ffffff';
-      }
+      // 字体颜色: node.fontColor > auto contrast
+      let defaultTextColor = '#2b333b';
+      if (isRoot && !n.color) defaultTextColor = '#fff';
+      else if (n.color) defaultTextColor = isLightColor(rectColor) ? '#2b333b' : '#ffffff';
+      const nodeFontColor = n.fontColor || defaultTextColor;
+      // spans: 逐字颜色; null = 整节点统一颜色
+      const hasSpans = Array.isArray(n.spans) && n.spans.length > 0 && n.spans.some((s) => s.color);
       for (let i = 0; i < lines.length; i++) {
         const t = document.createElementNS(ns, 'text');
         t.setAttribute('x', NODE_PAD_X);
         t.setAttribute('y', startY + i * lineH);
         t.setAttribute('font-size', fontSize);
         t.setAttribute('font-family', '-apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif');
-        t.setAttribute('fill', textColor);
         t.setAttribute('class', 'mm-node-text');
-        t.textContent = lines[i];
+        if (hasSpans) {
+          // 逐行拆分 spans,每行内按 span 片段渲染 tspan
+          const lineText = lines[i];
+          let offset = 0;
+          const lineSpans = splitSpansForLine(n.spans, lineText, n.text, i, lines);
+          for (const sp of lineSpans) {
+            const ts = document.createElementNS(ns, 'tspan');
+            ts.setAttribute('fill', sp.color || nodeFontColor);
+            ts.textContent = sp.text;
+            t.append(ts);
+          }
+        } else {
+          t.setAttribute('fill', nodeFontColor);
+          t.textContent = lines[i];
+        }
         grp.append(t);
       }
 
@@ -513,7 +528,7 @@ export class Mindmap {
       } else if (f) {
         const node = f.node;
         if (node.color) {
-          rect.setAttribute('stroke', colorCss(node.color));
+          rect.setAttribute('stroke', node.color.startsWith('#') ? node.color : colorCss(node.color));
           rect.setAttribute('stroke-width', '2');
         } else if (node.id === this.doc.root.id) {
           rect.setAttribute('stroke', '#3d7be0');
@@ -532,9 +547,25 @@ export class Mindmap {
     if (!this.selectedId) return;
     const f = findNode(this.doc.root, this.selectedId);
     if (!f) return;
-    f.node.fontSize = ['S', 'M', 'L'].includes(size) ? size : 'M';
+    // S/M/L → 对应数字; 数字 8-72 保留; 其他→14
+    if (size === 'S') f.node.fontSize = 12;
+    else if (size === 'L') f.node.fontSize = 18;
+    else if (size === 'M' || !size) f.node.fontSize = 14;
+    else if (typeof size === 'number' && size >= 8 && size <= 72) f.node.fontSize = Math.round(size);
+    else f.node.fontSize = 14;
     this.onChange(this.doc, true);
-    // 立即重绘,让字号修改立即可见
+    this.render();
+    this._applyTransform();
+  }
+
+  /** 设置节点字体颜色(整节点) */
+  applyFontColor(hex) {
+    if (!this.selectedId) return;
+    const f = findNode(this.doc.root, this.selectedId);
+    if (!f) return;
+    f.node.fontColor = hex || null;
+    f.node.spans = null; // 清除逐字颜色,统一用 fontColor
+    this.onChange(this.doc, true);
     this.render();
     this._applyTransform();
   }
@@ -548,12 +579,12 @@ export class Mindmap {
 }
 
 // ---------- 工厂 ----------
-function makeNode(text = '', fontSize = 'M', color = null) {
-  const valid = ['S', 'M', 'L'];
+function makeNode(text = '', fontSize = 'M', color = null, fontColor = null) {
+  const validSizes = ['S', 'M', 'L'];
   return {
     id: 'n_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
-    text, note: '', color, collapsed: false, children: [], side: 0,
-    fontSize: valid.includes(fontSize) ? fontSize : 'M',
+    text, note: '', color, fontColor, spans: null, collapsed: false, children: [], side: 0,
+    fontSize: validSizes.includes(fontSize) ? fontSize : (typeof fontSize === 'number' ? fontSize : 'M'),
   };
 }
 
@@ -563,9 +594,12 @@ const MEASURE = new WeakMap();
 
 /** 测量节点:按真实像素宽度换行(无 canvas 环境回退字符估宽) */
 function measureNode(node) {
-  const sizeKey = ['S', 'M', 'L'].includes(node.fontSize) ? node.fontSize : 'M';
-  const fontSize = FONT_SIZES[sizeKey];
-  const lineH = LINE_HEIGHTS[sizeKey];
+  // fontSize: 数字直接用; S/M/L 映射; 其他→14
+  let fontSize;
+  if (typeof node.fontSize === 'number' && node.fontSize >= 8 && node.fontSize <= 72) fontSize = node.fontSize;
+  else if (FONT_SIZES[node.fontSize]) fontSize = FONT_SIZES[node.fontSize];
+  else fontSize = 14;
+  const lineH = Math.round(fontSize * LINE_HEIGHT_RATIO);
   const maxW = NODE_MAX_W - NODE_PAD_X * 2;
 
   // 换行:显式 \n + 按词/字符自动换行
@@ -722,6 +756,26 @@ function layoutLeftRight(node) {
   place(node, 0, 0, true);
 }
 
+/** 将节点的 spans 按换行拆分为每行的 span 片段(供 tspan 渲染) */
+function splitSpansForLine(spans, lineText, fullText, lineIndex, lines) {
+  // 计算该行在全文中的起止偏移
+  let startOffset = 0;
+  for (let i = 0; i < lineIndex; i++) startOffset += lines[i].length + 1; // +1 for \n
+  const endOffset = startOffset + lineText.length;
+  const result = [];
+  let pos = 0;
+  for (const sp of spans) {
+    const spStart = pos;
+    const spEnd = pos + sp.text.length;
+    if (spEnd <= startOffset || spStart >= endOffset) { pos = spEnd; continue; }
+    const clipStart = Math.max(spStart, startOffset) - spStart;
+    const clipEnd = Math.min(spEnd, endOffset) - spStart;
+    result.push({ text: sp.text.slice(clipStart, clipEnd), color: sp.color });
+    pos = spEnd;
+  }
+  return result.length ? result : [{ text: lineText, color: null }];
+}
+
 /** 连线路径:形状随布局(水平 / 垂直 / 斜向 / 单侧) */
 function edgePath(layout, from, to) {
   const y1 = from.y + from.h / 2;
@@ -758,8 +812,8 @@ function edgePath(layout, from, to) {
 function collect(node, parent, nodes, edges) {
   const m = MEASURE.get(node);
   const item = {
-    id: node.id, text: node.text, color: node.color, fontSize: node.fontSize,
-    x: m.x, y: m.y, w: m.w, h: m.h, lines: m.lines,
+    id: node.id, text: node.text, color: node.color, fontColor: node.fontColor, spans: node.spans,
+    fontSize: node.fontSize, x: m.x, y: m.y, w: m.w, h: m.h, lines: m.lines,
     children: node.children, collapsed: node.collapsed,
   };
   nodes.push(item);

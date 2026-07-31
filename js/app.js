@@ -122,11 +122,24 @@ class App {
       mmAddSibling: $('#mmAddSibling'),
       mmDelete: $('#mmDelete'),
       mmFontSize: $('#mmFontSize'),
+      mmFontColor: $('#mmFontColor'),
       mmColor: $('#mmColor'),
       mmLayout: $('#mmLayout'),
       mmHint: $('#mmHint'),
       mmStatus: $('#mmStatus'),
       fontSizePopover: $('#fontSizePopover'),
+      fontSizeRange: $('#fontSizeRange'),
+      fontSizeNumber: $('#fontSizeNumber'),
+      fontColorPopover: $('#fontColorPopover'),
+      fontColorGrid: $('#fontColorGrid'),
+      fontColorHex: $('#fontColorHex'),
+      fontColorApply: $('#fontColorApply'),
+      fontColorClear: $('#fontColorClear'),
+      colorPopover: $('#colorPopover'),
+      colorGrid: $('#colorGrid'),
+      colorHexInput: $('#colorHexInput'),
+      colorHexApply: $('#colorHexApply'),
+      colorClear: $('#colorClear'),
       layoutPopover: $('#layoutPopover'),
       indentBtn: $('#indentBtn'),
       outdentBtn: $('#outdentBtn'),
@@ -425,6 +438,67 @@ class App {
     }
   }
   _hideColorPopover() { this.el.colorPopover.hidden = true; }
+
+  /** 获取节点字号(数字) */
+  _getNodeFontSize(node) {
+    if (!node) return 14;
+    if (typeof node.fontSize === 'number') return node.fontSize;
+    if (node.fontSize === 'S') return 12;
+    if (node.fontSize === 'L') return 18;
+    return 14;
+  }
+
+  /** 初始化字体颜色网格 */
+  _initFontColorGrid() {
+    if (this._fontColorGridInited) return;
+    this._fontColorGridInited = true;
+    import('./utils.js').then(({ FONT_COLORS }) => {
+      this.el.fontColorGrid.replaceChildren(
+        ...FONT_COLORS.map((c) => el('div', {
+          class: 'color-swatch',
+          style: { background: c },
+          title: c,
+          dataset: { color: c },
+        }))
+      );
+      this.el.fontColorGrid.addEventListener('click', (e) => {
+        const sw = e.target.closest('.color-swatch');
+        if (!sw) return;
+        this._applyFontColorToSelected(sw.dataset.color);
+        this.el.fontColorPopover.hidden = true;
+      });
+    });
+  }
+
+  /** 应用字体颜色到选中节点 */
+  _applyFontColorToSelected(hex) {
+    if (this.view === 'mindmap' && this.mindmap) {
+      this.mindmap.applyFontColor(hex);
+    } else if (this.outliner) {
+      // 若有文本选区,逐字着色;否则节点级
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
+        this.outliner.applySelectionColor(hex);
+      } else {
+        this.outliner.applyFontColor(hex);
+      }
+    }
+  }
+
+  /** 应用自定义背景色(直接设 hex,不走 COLORS 预设) */
+  _applyCustomBgColor(hex) {
+    let id = null;
+    if (this.view === 'mindmap' && this.mindmap?.selectedId) id = this.mindmap.selectedId;
+    else if (this.outliner?.selectedId) id = this.outliner.selectedId;
+    if (!id) return;
+    const node = this._findNode(this.doc.root, id);
+    if (!node) return;
+    // 直接用 hex 作为 color 值(不走 key 映射)
+    node.color = hex;
+    if (this.outliner) { this.outliner._saveFocus(); this.outliner.render(); }
+    if (this.view === 'mindmap' && this.mindmap) { this.mindmap.render(); this.mindmap._applyTransform(); }
+    this._onChange(this.doc, true);
+  }
   _selectedColor() {
     let id = null;
     if (this.view === 'mindmap' && this.mindmap?.selectedId) {
@@ -562,7 +636,7 @@ class App {
         this.toast('请先点击选中一个节点');
       }
     });
-    // 字号选择(用 fixed 定位避免坐标系问题)
+    // 字号选择(slider + number + preset buttons)
     this.el.mmFontSize.addEventListener('click', (e) => {
       e.stopPropagation();
       if (this.el.fontSizePopover.hidden) {
@@ -573,24 +647,79 @@ class App {
         this.el.fontSizePopover.style.left = 'auto';
         this.el.fontSizePopover.hidden = false;
         const f = this.mindmap?.selectedId ? findNode(this.doc.root, this.mindmap.selectedId) : null;
-        const cur = f?.node.fontSize || 'M';
+        const cur = this._getNodeFontSize(f?.node);
+        this.el.fontSizeRange.value = cur;
+        this.el.fontSizeNumber.value = cur;
         this.el.fontSizePopover.querySelectorAll('.font-size-item').forEach((b) => {
-          b.classList.toggle('active', b.dataset.size === cur);
+          b.classList.toggle('active', parseInt(b.dataset.size) === cur);
         });
       } else {
         this.el.fontSizePopover.hidden = true;
       }
     });
-    this.el.mmColor.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this._toggleColorPopover(e, this.el.mmColor);
+    this.el.fontSizeRange.addEventListener('input', () => {
+      this.el.fontSizeNumber.value = this.el.fontSizeRange.value;
+      this.mindmap?.applyFontSize(parseInt(this.el.fontSizeRange.value));
+    });
+    this.el.fontSizeNumber.addEventListener('change', () => {
+      const v = Math.max(8, Math.min(72, parseInt(this.el.fontSizeNumber.value) || 14));
+      this.el.fontSizeNumber.value = v;
+      this.el.fontSizeRange.value = v;
+      this.mindmap?.applyFontSize(v);
     });
     this.el.fontSizePopover.addEventListener('click', (e) => {
       e.stopPropagation();
       const item = e.target.closest('.font-size-item');
       if (!item) return;
-      this.mindmap?.applyFontSize(item.dataset.size);
-      this.el.fontSizePopover.hidden = true;
+      const v = parseInt(item.dataset.size);
+      this.el.fontSizeRange.value = v;
+      this.el.fontSizeNumber.value = v;
+      this.mindmap?.applyFontSize(v);
+      this.el.fontSizePopover.querySelectorAll('.font-size-item').forEach((b) => {
+        b.classList.toggle('active', parseInt(b.dataset.size) === v);
+      });
+    });
+    // 字体颜色
+    this.el.mmFontColor.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (this.el.fontColorPopover.hidden) {
+        const rect = this.el.mmFontColor.getBoundingClientRect();
+        this.el.fontColorPopover.style.position = 'fixed';
+        this.el.fontColorPopover.style.top = (rect.bottom + 6) + 'px';
+        this.el.fontColorPopover.style.right = (window.innerWidth - rect.right) + 'px';
+        this.el.fontColorPopover.style.left = 'auto';
+        this.el.fontColorPopover.hidden = false;
+        this._initFontColorGrid();
+      } else {
+        this.el.fontColorPopover.hidden = true;
+      }
+    });
+    this.el.fontColorApply.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const hex = this.el.fontColorHex.value.trim();
+      if (/^#[0-9a-fA-F]{6}$/.test(hex)) {
+        this._applyFontColorToSelected(hex);
+        this.el.fontColorPopover.hidden = true;
+      }
+    });
+    this.el.fontColorClear.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this._applyFontColorToSelected(null);
+      this.el.fontColorPopover.hidden = true;
+    });
+    // 背景色(节点)
+    this.el.mmColor.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this._toggleColorPopover(e, this.el.mmColor);
+    });
+    this.el.colorHexApply.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const hex = this.el.colorHexInput.value.trim();
+      if (/^#[0-9a-fA-F]{6}$/.test(hex)) {
+        // 自定义背景色:用 closest match 或直接应用
+        this._applyCustomBgColor(hex);
+        this.el.colorPopover.hidden = true;
+      }
     });
     // 布局选择
     this.el.mmLayout.addEventListener('click', (e) => {
@@ -622,6 +751,9 @@ class App {
     document.addEventListener('click', (e) => {
       if (!this.el.fontSizePopover.hidden && !this.el.fontSizePopover.contains(e.target) && !this.el.mmFontSize.contains(e.target)) {
         this.el.fontSizePopover.hidden = true;
+      }
+      if (!this.el.fontColorPopover.hidden && !this.el.fontColorPopover.contains(e.target) && !this.el.mmFontColor.contains(e.target)) {
+        this.el.fontColorPopover.hidden = true;
       }
       if (!this.el.layoutPopover.hidden && !this.el.layoutPopover.contains(e.target) && !this.el.mmLayout.contains(e.target)) {
         this.el.layoutPopover.hidden = true;

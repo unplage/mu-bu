@@ -31,7 +31,12 @@ node test-mindmap.mjs     # 思维导图渲染，33 项
 - `js/tree.js` 是唯一纯函数模块（树遍历/增删移/缩进），不依赖 DOM，可独立测试；其余模块直接操作 DOM。
 - `js/mindmap.js` 用 SVG 渲染（`measureNode`→`layoutHeight`→`assignPos`），PNG 导出经 canvas 转换。
 - `js/share.js` 用 `CompressionStream('gzip')` + base64url 把文档压进 URL hash，约 12000 字符上限；旧浏览器会报错（已 try/catch）。
-- 数据模型：`doc = {id, title, createdAt, updatedAt, root: {id, text, note, color, collapsed, children:[]}}`；IndexedDB 单 store `docs`，keyPath `id`。
+- 数据模型：`doc = {id, title, layout, createdAt, updatedAt, root: {id, text, note, color, fontColor, spans, fontSize, side, collapsed, children:[]}}`；IndexedDB 单 store `docs`，keyPath `id`。
+  - `fontSize`: 数字 8-72（px），向后兼容 'S'/'M'/'L'（validateDoc 转数字）
+  - `fontColor`: hex 字符串或 null（null = 自动对比色）
+  - `spans`: `[{text, color}] | null` — 逐字富文本，null = 整节点用 fontColor
+  - `color`: 节点背景色（预设 key 或 hex）
+  - `side`: 0=自动/1=左/2=右（左右交错布局用）
 - 数据流：视图直接改 doc → `onChange(doc, persist)` → `app._onChange` → `DB.saveDoc`（persist=true 立即存，否则防抖 400ms）→ 同步另一视图。
 - 部署：GitHub Pages，全相对路径（`./`），无需配 base。
 
@@ -45,6 +50,12 @@ node test-mindmap.mjs     # 思维导图渲染，33 项
 - Outliner 每次 `render()` 后 contenteditable 焦点丢失：操作前先 `_saveFocus()`（节点 id + caret offset），再用 `_restoreFocus()` 恢复。
 - 配色统一走 `app._applyColorToSelected`：按当前视图取选中 id（大纲 `outliner.selectedId`，导图 `mindmap.lastClickedId`）。
 - 导图选中是**增量更新**（`_select`/`_syncSelectionAttrs` 只改边框属性，不整图重绘）；结构变更才 `render()`。
+- 多布局引擎：向右/向下/径向/左右交错，通过 `mindmap.setLayout(name)` 切换 + `doc.layout` 持久化。`MEASURE` WeakMap 存布局坐标，节点模型零污染。
+- 逐字字体颜色：`node.spans=[{text,color}]`，null=整节点用 fontColor。大纲用 `<span style="color:...">` 渲染，导图用 `<tspan fill="...">`。编辑时 `spansFromDom` 从 DOM 重建。
+- 字号范围 8-72px 连续值（旧 S/M/L 向后兼容→12/14/18）。`measureNode` 按数字 fontSize 计算行高（`fontSize * 1.4`）。
+- 背景色支持预设 key（16 色）和直接 hex 字符串。`shade()` 对 hex 生成浅色版（85% 白色混合）。
+- 导出 SVG/PNG：clone 后移除 `<g>` transform 再计算 viewBox，确保内容完整。
+- 右键菜单：导图节点右键弹出完整菜单（加子/兄弟/删除/折叠/放左/放右/自动）。
 - PWA：`sw.js` 缓存优先 + 后台更新，导航失败回退 `./index.html`；改 JS 必须同步 bump `VERSION`。
 - `mubu.html` 与 `index.html` 仅标题不同（重复入口），`sw.js` 只引用后者。
 
