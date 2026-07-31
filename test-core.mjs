@@ -236,6 +236,55 @@ console.log('--- share 往返保留 fontColor/spans ---');
   assert(decoded.root.spans[0].color === '#0000ff', 'span color 往返');
 }
 
+console.log('--- share 数字字号往返(8-72px) ---');
+{
+  const doc = {
+    id: 'doc_x', title: '字号', createdAt: 1, updatedAt: 2,
+    root: {
+      id: 'r', text: '根', note: '', color: null, collapsed: false, children: [
+        { id: 'c1', text: '24px', note: '', color: null, collapsed: false, children: [], fontSize: 24, side: 0 },
+        { id: 'c2', text: '12px', note: '', color: null, collapsed: false, children: [], fontSize: 12, side: 0 },
+        { id: 'c3', text: '14默认', note: '', color: null, collapsed: false, children: [], fontSize: 14, side: 0 },
+        { id: 'c4', text: 'L', note: '', color: null, collapsed: false, children: [], fontSize: 'L', side: 0 },
+      ],
+    },
+  };
+  const hash = await Share.encodeShare(doc);
+  const decoded = await Share.decodeShare(hash);
+  assert(decoded.root.children[0].fontSize === 24, '数字 24 往返, got ' + decoded.root.children[0].fontSize);
+  assert(decoded.root.children[1].fontSize === 12, '数字 12 往返, got ' + decoded.root.children[1].fontSize);
+  assert(decoded.root.children[2].fontSize === 'M', '默认 14 不编码回 M, got ' + decoded.root.children[2].fontSize);
+  assert(decoded.root.children[3].fontSize === 'L', '字符串 L 往返, got ' + decoded.root.children[3].fontSize);
+}
+
+console.log('--- share 单 span 颜色往返 ---');
+{
+  const doc = {
+    id: 'doc_x', title: '单色', createdAt: 1, updatedAt: 2,
+    root: {
+      id: 'r', text: 'Hi', note: '', color: null, fontColor: null,
+      spans: [{ text: 'Hi', color: '#ff0000' }],
+      collapsed: false, fontSize: 'M', side: 0, children: [],
+    },
+  };
+  const hash = await Share.encodeShare(doc);
+  const decoded = await Share.decodeShare(hash);
+  assert(decoded.root.spans !== null && decoded.root.spans.length === 1, '单 span 保留');
+  assert(decoded.root.spans[0].color === '#ff0000', '单 span 颜色保留');
+  assert(decoded.root.spans[0].text === 'Hi', '单 span 文本保留');
+}
+
+console.log('--- export Markdown 含 note ---');
+{
+  const doc = { title: 'Test', root: { id: 'r', text: 'Test', note: '', color: null, collapsed: false, children: [
+    { id: 'a', text: 'A', note: '这是备注\n第二行', color: null, collapsed: false, children: [] },
+  ] } };
+  const md = Export.exportMarkdown(doc);
+  assert(md.includes('- A'), 'md 有节点 A');
+  assert(md.includes('  这是备注'), 'md 有备注第一行');
+  assert(md.includes('  第二行'), 'md 有备注第二行');
+}
+
 console.log('--- share 往返保留 layout/side ---');
 {
   const doc = {

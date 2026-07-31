@@ -238,5 +238,31 @@ console.log('--- Outliner collapseAll / expandAll ---');
   assert(container.querySelectorAll('.outline-row').length === 4, 'expandAll: 全部4可见');
 }
 
+console.log('--- Outliner 备注行 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = 'root';
+  doc.root.children.push(createNode('a'));
+  doc.root.children.push(createNode('b'));
+  doc.root.children[0].note = '这是备注';
+  const container = document.createElement('div');
+  const outliner = new Outliner(container, doc, () => {});
+  outliner.selectedId = doc.root.children[1].id; // b 选中(无 note)
+  outliner.render();
+
+  const aNote = container.querySelector('.node-note[data-id="' + doc.root.children[0].id + '"]');
+  assert(aNote !== null, '有 note 的节点渲染备注行');
+  assert(aNote.textContent === '这是备注', '备注内容正确');
+  const rootNote = container.querySelector('.node-note[data-id="' + doc.root.id + '"]');
+  assert(rootNote === null, '无 note 且未选中的节点不显示备注行');
+  const bNote = container.querySelector('.node-note[data-id="' + doc.root.children[1].id + '"]');
+  assert(bNote !== null, '选中无 note 节点显示可编辑备注行');
+  assert(bNote.textContent === '', '空备注行无内容');
+
+  bNote.textContent = '新备注';
+  bNote.dispatchEvent(new window.Event('input'));
+  assert(doc.root.children[1].note === '新备注', '备注输入更新模型, got ' + doc.root.children[1].note);
+}
+
 console.log(`\n=== DOM 测试: ${pass} passed, ${fail} failed ===`);
 process.exit(fail ? 1 : 0);

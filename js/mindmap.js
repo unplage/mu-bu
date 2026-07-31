@@ -40,6 +40,13 @@ export class Mindmap {
     this.fit();
   }
 
+  /** 同步文档引用但不重绘/不重置视角。触发方(结构操作/文本提交)自己会 render。 */
+  syncDoc(doc) {
+    this.doc = doc;
+    this.layout = LAYOUTS.includes(doc.layout) ? doc.layout : 'right';
+    if (!findNode(doc.root, this.selectedId)) this.selectedId = doc.root.id;
+  }
+
   /** 切换布局(重绘 + 自适应) */
   setLayout(name) {
     if (!LAYOUTS.includes(name)) return;
@@ -154,6 +161,7 @@ export class Mindmap {
       const f = findNode(this.doc.root, g.dataset.id);
       if (!f) return;
       this._select(f.node.id);
+      this.container.focus();
       this._showContextMenu(e, f.node, f.parent, f.index);
     });
   }
@@ -491,6 +499,8 @@ export class Mindmap {
       // 交互
       grp.addEventListener('click', (e) => {
         e.stopPropagation();
+        // 点击节点后把焦点还给画布容器,保证键盘快捷键(结构操作)持续可用
+        this.container.focus();
         const wasDrag = this._wasDragging;
         const wasLongPress = this._longPressTriggered;
         this._wasDragging = false;
@@ -641,7 +651,8 @@ function measureNode(node) {
   const h = lines.length * lineH + NODE_PAD_Y * 2;
 
   MEASURE.set(node, { w, h, lines });
-  if (node.children) for (const c of node.children) measureNode(c);
+  // 折叠子树不渲染也不参与布局,无需测量
+  if (node.children && !node.collapsed) for (const c of node.children) measureNode(c);
 }
 
 function layoutHeight(node) {
@@ -705,7 +716,13 @@ function layoutDownTree(node) {
   place(node, 0, 0);
 }
 
-/** 径向辐射:子节点按角度扇区分布,半径随层级增长 */
+/** 统计子树可见叶子数(用于径向角度分配,大树占更多角度避免重叠) */
+function leafCount(node) {
+  if (!node.children || node.collapsed || node.children.length === 0) return 1;
+  return node.children.reduce((a, c) => a + leafCount(c), 0);
+}
+
+/** 径向辐射:按子树叶子数比例分配角度扇区,半径随层级增长 */
 function layoutRadial(node) {
   const place = (n, cx, cy, angleStart, angleEnd, level) => {
     const m = MEASURE.get(n);
@@ -713,21 +730,26 @@ function layoutRadial(node) {
     m.y = cy - m.h / 2;
     if (!n.children || n.collapsed || n.children.length === 0) return;
     const count = n.children.length;
-    let angleRange = Math.min(angleEnd - angleStart, Math.PI * 2 * 0.7);
-    if (count === 1) angleRange = 0.6;
+    const weights = n.children.map(leafCount);
+    const totalW = weights.reduce((a, b) => a + b, 0) || count;
     const maxW = Math.max(...n.children.map((c) => MEASURE.get(c).w));
+    // 半径:至少容纳最宽的兄弟节点
     let needR;
     if (count > 1) {
-      const anglePer = angleRange / (count - 1);
+      const anglePer = (Math.PI * 2 * 0.7) / Math.max(count - 1, 1);
       needR = anglePer > 0.01 ? (maxW + 20) / (2 * Math.sin(anglePer / 2)) : maxW * count / Math.PI;
     } else {
       needR = maxW;
     }
     const radius = Math.max(80 + level * 60, needR + 20);
-    const start = angleStart + (angleEnd - angleStart - angleRange) / 2;
+    // 本节点可用角度范围:传入扇区内、但最多占整圆的 0.7
+    const usable = Math.min(angleEnd - angleStart, Math.PI * 2 * 0.7);
+    let cur = angleStart + (angleEnd - angleStart - usable) / 2;
     for (let i = 0; i < count; i++) {
-      const a = count > 1 ? start + angleRange * i / (count - 1) : start + angleRange / 2;
-      place(n.children[i], cx + radius * Math.cos(a), cy + radius * Math.sin(a), a - 0.4, a + 0.4, level + 1);
+      const sector = usable * weights[i] / totalW;
+      const a = cur + sector / 2;
+      place(n.children[i], cx + radius * Math.cos(a), cy + radius * Math.sin(a), cur, cur + sector, level + 1);
+      cur += sector;
     }
   };
   place(node, 0, 0, 0, Math.PI * 2, 0);

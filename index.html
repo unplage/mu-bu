@@ -76,7 +76,11 @@ input, textarea { font-family: inherit; }
 .view-outline { overflow: auto; background: var(--bg-elev); }
 .outline-tree { padding: 24px 32px 200px; max-width: 920px; margin: 0 auto; outline: none; }
 .outline-row { display: flex; align-items: flex-start; gap: 6px; padding: 2px 0; border-radius: 4px; position: relative; }
-.outline-row.selected > .node-body { background: var(--primary-soft); }
+.outline-row.selected .node-body { background: var(--primary-soft); }
+.outline-content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.node-note { font-size: 12px; color: var(--text-faint); padding: 0 6px 3px; border-radius: 3px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; outline: none; }
+.node-note:focus { color: var(--text-soft); }
+.node-note:empty::before { content: attr(data-placeholder); opacity: 0.6; pointer-events: none; }
 .outline-row.dragging { opacity: 0.4; }
 .outline-row.drop-before::before, .outline-row.drop-after::after { content: ""; position: absolute; left: 0; right: 0; height: 2px; background: var(--primary); border-radius: 1px; }
 .outline-row.drop-before::before { top: -1px; }
@@ -223,6 +227,7 @@ input, textarea { font-family: inherit; }
         <button id="mmAddChild" class="mm-btn" title="添加子节点 (Tab)">＋子节点</button>
         <button id="mmAddSibling" class="mm-btn" title="添加兄弟">＋兄弟</button>
         <button id="mmDelete" class="mm-btn" title="删除 (Backspace)">🗑 删除</button>
+        <button id="mmToggleCollapse" class="mm-btn" title="折叠/展开子节点">⇲ 折叠</button>
         <div class="mm-divider"></div>
         <button id="mmFontSize" class="mm-btn" title="字号">字号</button>
         <button id="mmFontColor" class="mm-btn" title="字体颜色">字色</button>
@@ -239,9 +244,13 @@ input, textarea { font-family: inherit; }
 </div>
 
 <div id="colorPopover" class="popover" hidden>
-  <div class="popover-title">节点配色</div>
+  <div class="popover-title">节点背景色</div>
   <div class="color-grid" id="colorGrid"></div>
-  <button id="colorClear" class="btn btn-ghost btn-block">清除颜色</button>
+  <div style="display:flex;gap:4px;margin-top:8px">
+    <input id="colorHexInput" type="text" placeholder="#ffffff" maxlength="7" style="flex:1;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px">
+    <button id="colorHexApply" class="btn btn-ghost" style="font-size:12px">应用</button>
+  </div>
+  <button id="colorClear" class="btn btn-ghost btn-block" style="margin-top:4px;font-size:12px">清除颜色</button>
 </div>
 
 <div id="fontSizePopover" class="popover" hidden>
@@ -269,16 +278,6 @@ input, textarea { font-family: inherit; }
     <button id="fontColorApply" class="btn btn-ghost" style="font-size:12px">应用</button>
   </div>
   <button id="fontColorClear" class="btn btn-ghost btn-block" style="margin-top:4px;font-size:12px">清除(自动)</button>
-</div>
-
-<div id="colorPopover" class="popover" hidden>
-  <div class="popover-title">节点背景色</div>
-  <div class="color-grid" id="colorGrid"></div>
-  <div style="display:flex;gap:4px;margin-top:8px">
-    <input id="colorHexInput" type="text" placeholder="#ffffff" maxlength="7" style="flex:1;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px">
-    <button id="colorHexApply" class="btn btn-ghost" style="font-size:12px">应用</button>
-  </div>
-  <button id="colorClear" class="btn btn-ghost btn-block" style="margin-top:4px;font-size:12px">清除颜色</button>
 </div>
 
 <div id="layoutPopover" class="popover" hidden>

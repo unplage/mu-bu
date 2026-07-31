@@ -151,11 +151,36 @@ export class Outliner {
     text.innerHTML = textToHtml(node.text, node.spans, node.fontColor);
 
     const body = el('div', { class: 'node-body' }, [text]);
+    const contentKids = [body];
+    // 备注行:有内容或节点被选中时显示(灰色小字,可编辑)
+    if (node.note || selected) {
+      const note = el('div', {
+        class: 'node-note' + (node.note ? ' has-note' : ''),
+        contenteditable: 'true',
+        spellcheck: 'false',
+        dataset: { id: node.id, placeholder: '添加备注…' },
+      });
+      note.innerHTML = node.note ? escapeHtml(node.note).split('\n').join('<br>') : '';
+      note.addEventListener('input', () => {
+        const nf = findNode(this.doc.root, node.id);
+        if (nf) nf.node.note = textToModel(note).replace(/\s+$/, '');
+        const h = row.offsetHeight || 0;
+        if (h > 0) this._heights.set(node.id, h);
+        this._emitChange(false);
+      });
+      note.addEventListener('paste', (e) => {
+        e.preventDefault();
+        const txt = (e.clipboardData || window.clipboardData).getData('text/plain');
+        document.execCommand?.('insertText', false, txt);
+      });
+      contentKids.push(note);
+    }
+    const content = el('div', { class: 'outline-content' }, contentKids);
     const row = el('div', {
       class: 'outline-row' + (selected ? ' selected' : ''),
       dataset: { id: node.id, depth: String(depth) },
       draggable: depth !== 0 ? 'true' : 'false',
-    }, [bullet, body]);
+    }, [bullet, content]);
     row.style.paddingLeft = (depth * 22) + 'px';
 
     // 输入处理:仅更新模型,不重渲染;顺带刷新行高缓存

@@ -85,6 +85,10 @@ export function exportMarkdown(doc) {
       const indent = '  '.repeat(depth - 1);
       const text = node.text.replace(/\n/g, '\n' + indent + '  ');
       lines.push(indent + '- ' + text);
+      if (node.note) {
+        const noteIndent = '  '.repeat(depth);
+        lines.push(noteIndent + node.note.replace(/\n/g, '\n' + noteIndent));
+      }
     }
     if (node.children) for (const c of node.children) rec(c, depth + 1);
   };
@@ -101,6 +105,7 @@ export function exportText(doc) {
   const rec = (node, depth) => {
     if (depth > 0) {
       lines.push('  '.repeat(depth - 1) + '• ' + node.text);
+      if (node.note) lines.push('  '.repeat(depth) + node.note);
     }
     if (node.children) for (const c of node.children) rec(c, depth + 1);
   };

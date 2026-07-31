@@ -24,9 +24,9 @@ function trimNode(n) {
     c: n.color || undefined,
     o: n.fontColor || undefined,
     k: n.collapsed ? 1 : undefined,
-    f: (n.fontSize && n.fontSize !== 'M') ? n.fontSize : undefined,
+    f: (n.fontSize && n.fontSize !== 'M' && n.fontSize !== 14) ? n.fontSize : undefined,
     d: (n.side && n.side !== 0) ? n.side : undefined,
-    s: (Array.isArray(n.spans) && n.spans.length > 1) ? n.spans.map((sp) => ({
+    s: (Array.isArray(n.spans) && n.spans.length > 0 && n.spans.some((sp) => sp.color)) ? n.spans.map((sp) => ({
       x: sp.text,
       c: sp.color || undefined,
     })) : undefined,
@@ -68,7 +68,8 @@ function restoreNode(s) {
     spans,
     collapsed: !!s.k,
     children: s.h ? s.h.map(restoreNode) : [],
-    fontSize: ['S', 'M', 'L'].includes(s.f) ? s.f : 'M',
+    fontSize: (typeof s.f === 'number' && s.f >= 8 && s.f <= 72) ? s.f
+      : (['S', 'L'].includes(s.f) ? s.f : 'M'),
     side: [0, 1, 2].includes(s.d) ? s.d : 0,
   };
 }

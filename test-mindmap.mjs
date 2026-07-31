@@ -11,6 +11,7 @@ Object.defineProperty(globalThis, 'navigator', { value: { serviceWorker: { regis
 
 const { Mindmap } = await import('./js/mindmap.js');
 const { createDoc, createNode } = await import('./js/db.js');
+const Tree = await import('./js/tree.js');
 
 let pass = 0, fail = 0;
 function assert(c, m) { if (c) { pass++; console.log('  ✓', m); } else { fail++; console.log('  ✗', m); } }
@@ -387,6 +388,78 @@ console.log('--- Mindmap 背景色 hex ---');
   const rect = container.querySelector('.mm-node[data-id="' + doc.root.children[0].id + '"] .mm-node-rect');
   assert(rect.getAttribute('fill') !== '#ffffff', '自定义 hex 背景色非白色, got ' + rect.getAttribute('fill'));
   assert(rect.getAttribute('stroke') === '#ff6600', '自定义 hex 边框色, got ' + rect.getAttribute('stroke'));
+}
+
+console.log('--- Mindmap 点击节点后画布保持焦点 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = '根';
+  doc.root.children.push(createNode('A'));
+  const container = document.createElement('div');
+  const mm = new Mindmap(container, doc, () => {});
+  mm.render();
+  let focused = 0;
+  container.focus = () => { focused++; };
+  const nodeA = container.querySelector('.mm-node[data-id="' + doc.root.children[0].id + '"]');
+  nodeA.dispatchEvent(new window.Event('click'));
+  assert(focused === 1, '点击节点后容器 focus 被调用(键盘快捷键可用), got ' + focused);
+  assert(mm.selectedId === doc.root.children[0].id, '点击节点被选中');
+}
+
+console.log('--- Mindmap syncDoc 保留视角/缩放 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = '根';
+  doc.root.children.push(createNode('A'));
+  const container = document.createElement('div');
+  const mm = new Mindmap(container, doc, () => {});
+  mm.render();
+  mm.zoomBy(1.5);
+  mm.tx = 123; mm.ty = 45;
+  const before = { scale: mm.scale, tx: mm.tx, ty: mm.ty };
+  doc.root.children[0].text = '改';
+  mm.syncDoc(doc);
+  assert(mm.scale === before.scale && mm.tx === before.tx && mm.ty === before.ty, 'syncDoc 不重置视角');
+  assert(mm.doc === doc, 'syncDoc 更新 doc 引用');
+  const doc2 = createDoc('T2');
+  mm.syncDoc(doc2);
+  assert(mm.selectedId === doc2.root.id, 'syncDoc 失效选中回退到新根');
+  assert(mm.layout === 'right', 'syncDoc 读取新 doc 布局');
+}
+
+console.log('--- Mindmap 径向布局子树角度不重叠 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = '根';
+  for (let i = 0; i < 8; i++) {
+    const c = createNode('子' + i);
+    for (let j = 0; j < 3; j++) c.children.push(createNode('孙'));
+    doc.root.children.push(c);
+  }
+  const container = document.createElement('div');
+  const mm = new Mindmap(container, doc, () => {});
+  mm.setLayout('radial');
+  const angleOf = (id) => {
+    const g = container.querySelector('.mm-node[data-id="' + id + '"]');
+    const m = g.getAttribute('transform').match(/translate\(([-\d.]+),([-\d.]+)\)/);
+    const x = parseFloat(m[1]);
+    const y = parseFloat(m[2]);
+    const w = parseFloat(g.querySelector('.mm-node-rect').getAttribute('width'));
+    const h = parseFloat(g.querySelector('.mm-node-rect').getAttribute('height'));
+    return Math.atan2(y + h / 2, x + w / 2);
+  };
+  const intervals = [];
+  for (const c of doc.root.children) {
+    const angles = [angleOf(c.id)];
+    for (const d of Tree.walkAll(c)) if (d.id !== c.id) angles.push(angleOf(d.id));
+    intervals.push({ min: Math.min(...angles), max: Math.max(...angles) });
+  }
+  intervals.sort((a, b) => a.min - b.min);
+  let overlap = false;
+  for (let i = 1; i < intervals.length; i++) {
+    if (intervals[i].min < intervals[i - 1].max - 0.01) { overlap = true; break; }
+  }
+  assert(!overlap, '径向布局相邻子树角度扇区不重叠');
 }
 
 console.log(`\n=== Mindmap 测试: ${pass} passed, ${fail} failed ===`);

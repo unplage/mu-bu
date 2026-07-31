@@ -120,6 +120,7 @@ class App {
       mmAddChild: $('#mmAddChild'),
       mmAddSibling: $('#mmAddSibling'),
       mmDelete: $('#mmDelete'),
+      mmToggleCollapse: $('#mmToggleCollapse'),
       mmFontSize: $('#mmFontSize'),
       mmFontColor: $('#mmFontColor'),
       mmColor: $('#mmColor'),
@@ -166,6 +167,10 @@ class App {
     this.el.outdentBtn.addEventListener('click', () => { if (this.outliner) this.outliner.outdentSelected(); });
 
     document.addEventListener('keydown', (e) => {
+      // 内容编辑态(大纲 contenteditable / 导图输入框)内放行原生文本撤销
+      if (e.isComposing || e.keyCode === 229) return;
+      const inTextEdit = e.target.closest?.('.node-text, .mm-edit');
+      if (inTextEdit) return;
       const mod = e.ctrlKey || e.metaKey;
       if (mod && e.key.toLowerCase() === 'z') {
         e.preventDefault();
@@ -321,9 +326,9 @@ class App {
       this._saveDebounced(doc);
       this._pushHistoryDebounced(doc);
     }
-    // 当前视图的非编辑组件同步模型(避免切回时丢失改动)
+    // 当前视图的非编辑组件同步模型(避免切回时丢失改动);不重绘以免重置缩放/视角
     if (this.view === 'mindmap' && this.mindmap && !this.mindmap.editingId) {
-      this.mindmap.setDoc(doc);
+      this.mindmap.syncDoc(doc);
     }
     if (this.view === 'outline' && this.outliner) {
       // 大纲正在编辑时不重渲染(避免光标跳),仅更新 doc 引用
@@ -535,7 +540,25 @@ class App {
     });
     this.el.copyShare.addEventListener('click', () => {
       this.el.shareLink.select();
-      navigator.clipboard.writeText(this.el.shareLink.value).then(() => this.toast('已复制链接'));
+      const copy = async () => {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(this.el.shareLink.value);
+          return;
+        }
+        // 非安全上下文等环境降级:临时 textarea + execCommand
+        const ta = document.createElement('textarea');
+        ta.value = this.el.shareLink.value;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.append(ta);
+        ta.select();
+        const ok = document.execCommand?.('copy');
+        ta.remove();
+        if (!ok) throw new Error('复制被浏览器拒绝');
+      };
+      copy()
+        .then(() => this.toast('已复制链接'))
+        .catch(() => this.toast('复制失败,请手动选中链接复制'));
     });
     this.el.shareDownload.addEventListener('click', () => {
       Export.exportJSON(this.doc);
@@ -636,6 +659,20 @@ class App {
         const f = findNode(this.doc.root, this.mindmap.selectedId);
         if (f?.parent) this.mindmap._delete(f.parent, f.index);
         else this.toast('根节点不可删除');
+      } else {
+        this.toast('请先点击选中一个节点');
+      }
+    });
+    this.el.mmToggleCollapse.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.el.mindmapCanvas.focus();
+      if (this.mindmap?.selectedId) {
+        const f = findNode(this.doc.root, this.mindmap.selectedId);
+        if (!f?.node?.children?.length) { this.toast('该节点没有子节点'); return; }
+        f.node.collapsed = !f.node.collapsed;
+        this.mindmap.render();
+        this.mindmap._applyTransform();
+        this._onChange(this.doc, true);
       } else {
         this.toast('请先点击选中一个节点');
       }
