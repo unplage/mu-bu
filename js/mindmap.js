@@ -32,6 +32,7 @@ export class Mindmap {
     this.layout = LAYOUTS.includes(doc.layout) ? doc.layout : 'right';
     this.selectedId = doc.root.id;
     this._selectedExtra = new Set();
+    this._selectionMode = false; // 移动端选择模式
     this.editingId = null;
     this._editingDraft = '';
     this._panning = null;
@@ -148,7 +149,11 @@ export class Mindmap {
             const f = findNode(this.doc.root, id);
             if (f) {
               this._longPressTriggered = true;
-              this._startEdit(f.node);
+              this._select(f.node.id);
+              // 移动端无右键:长按弹完整菜单(编辑/增删/折叠/放左放右)
+              this._showContextMenu({
+                clientX: t.clientX, clientY: t.clientY, preventDefault() {}, stopPropagation() {},
+              }, f.node, f.parent, f.index);
             }
           }, 500);
         }
@@ -402,6 +407,7 @@ export class Mindmap {
       menu.append(b);
     };
 
+    addItem('编辑', false, () => this._startEdit(node));
     addItem('添加子节点', false, () => this._addChild(node));
     addItem('添加兄弟节点', !parent, () => this._addSibling(parent, index));
     addItem('删除节点', !parent, () => this._delete(parent, index));
@@ -781,8 +787,8 @@ export class Mindmap {
           return;
         }
         if (e.detail === 2 && !isMobile) { this._startEdit(n); return; }
-        // 单击:增量更新选中态(Ctrl=多选),不整图重绘
-        this._select(n.id, e.ctrlKey || e.metaKey);
+        // 单击:增量更新选中态(Ctrl 或选择模式 = 多选),不整图重绘
+        this._select(n.id, e.ctrlKey || e.metaKey || this._selectionMode);
       });
 
       g.append(grp);
@@ -862,6 +868,13 @@ export class Mindmap {
   /** 选中集(主节点 + 多选附加) */
   getSelectedIds() {
     return [this.selectedId, ...this._selectedExtra];
+  }
+
+  /** 移动端选择模式:开启后点按即多选 */
+  setSelectionMode(on) {
+    this._selectionMode = !!on;
+    if (!on) this._selectedExtra.clear();
+    this.render();
   }
 
   _toggleTodo(node) {

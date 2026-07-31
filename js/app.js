@@ -29,10 +29,11 @@ class App {
     this._bindSidebar();
     this._bindModals();
     this._bindMindmapControls();
+    this._bindMobileActions();
     this._bindResize();
     this._initColorGrid();
     this.el.mmHint.textContent = isMobile
-      ? '双击编辑 · 双指缩放 · 拖拽平移 · 单击选中'
+      ? '长按弹菜单 · 双指缩放 · 拖拽平移 · 单击选中'
       : 'Tab 添加子节点 · Enter 添加兄弟 · 双击编辑 · Shift+点击折叠 · 拖拽平移 · 滚轮缩放';
 
     // 防抖保存的兜底冲刷:切后台/关闭页面前把最后一次编辑落盘
@@ -176,6 +177,17 @@ class App {
       tocList: $('#tocList'),
       tocClose: $('#tocClose'),
       olStatus: $('#olStatus'),
+      olActionBar: $('#olActionBar'),
+      actUp: $('#actUp'),
+      actDown: $('#actDown'),
+      actIndent: $('#actIndent'),
+      actOutdent: $('#actOutdent'),
+      actDelete: $('#actDelete'),
+      actColor: $('#actColor'),
+      actMulti: $('#actMulti'),
+      actDone: $('#actDone'),
+      mmMulti: $('#mmMulti'),
+      mmMultiDone: $('#mmMultiDone'),
     };
   }
 
@@ -344,6 +356,7 @@ class App {
     this.el.viewMindmap.classList.toggle('active', view === 'mindmap');
     this.el.outlineView.hidden = view !== 'outline';
     this.el.mindmapView.hidden = view !== 'mindmap';
+    this.el.olActionBar.hidden = view !== 'outline';
     // 切换到的视图同步最新 doc(双向同步)
     if (view === 'mindmap' && this.mindmap) {
       this.mindmap.setDoc(this.doc);
@@ -1016,6 +1029,33 @@ class App {
     }, 150));
   }
 
+  // ---------- 移动端操作条 / 选择模式 ----------
+  _bindMobileActions() {
+    const act = (fn) => (e) => { e.stopPropagation(); fn(); };
+    this.el.actUp.addEventListener('click', act(() => this.outliner?.moveNodeBy(-1)));
+    this.el.actDown.addEventListener('click', act(() => this.outliner?.moveNodeBy(1)));
+    this.el.actIndent.addEventListener('click', act(() => this.outliner?.indentSelectedMulti()));
+    this.el.actOutdent.addEventListener('click', act(() => this.outliner?.outdentSelectedMulti()));
+    this.el.actDelete.addEventListener('click', act(() => this.outliner?.deleteSelected()));
+    this.el.actColor.addEventListener('click', act(() => this._toggleColorPopover({ stopPropagation: () => {} }, this.el.actColor)));
+    this.el.actMulti.addEventListener('click', act(() => this._setSelectionMode(true)));
+    this.el.actDone.addEventListener('click', act(() => this._setSelectionMode(false)));
+    this.el.mmMulti.addEventListener('click', act(() => this._setSelectionMode(true)));
+    this.el.mmMultiDone.addEventListener('click', act(() => this._setSelectionMode(false)));
+  }
+
+  /** 切换选择模式(移动端多选),同步大纲/导图与按钮状态 */
+  _setSelectionMode(on) {
+    this._selectionMode = !!on;
+    this.outliner?.setSelectionMode(on);
+    this.mindmap?.setSelectionMode(on);
+    this.el.actMulti.classList.toggle('active', on);
+    this.el.mmMulti.classList.toggle('active', on);
+    this.el.actDone.hidden = !on;
+    this.el.mmMultiDone.hidden = !on;
+    if (on) this.toast('选择模式:点按节点进行多选');
+  }
+
   // ---------- 富文本选区缓存 ----------
   _saveTextSelection() {
     this._savedTextSelection = null;
@@ -1119,6 +1159,7 @@ class App {
   // ---------- 搜索 / 替换 ----------
   _openSearch() {
     this.el.searchBar.hidden = false;
+    this.el.outlineTree.classList.add('search-open');
     this.el.searchInput.focus();
     this.el.searchInput.select();
     this._doSearch();
@@ -1126,6 +1167,7 @@ class App {
 
   _closeSearch() {
     this.el.searchBar.hidden = true;
+    this.el.outlineTree.classList.remove('search-open');
     this.el.searchInput.value = '';
     this.el.searchReplace.value = '';
     if (this.outliner) { this.outliner.setSearchQuery(''); this.outliner.setTagFilter(null); }
@@ -1161,7 +1203,8 @@ class App {
       (n.children || []).forEach(rec);
     };
     rec(this.doc.root);
-    if (!map.size) { this.el.tagBar.hidden = true; return; }
+    this.el.outlineTree.classList.toggle('tag-open', !this.el.tagBar.hidden);
+    if (!map.size) { this.el.tagBar.hidden = true; this.el.outlineTree.classList.remove('tag-open'); return; }
     this.el.tagBar.hidden = false;
     const active = this._tagFilter;
     this.el.tagBar.replaceChildren(...[...map.entries()].sort((a, b) => b[1] - a[1]).map(([t, c]) =>

@@ -18,6 +18,7 @@ export class Outliner {
     this.onChange = onChange; // (doc, persist) => void
     this.selectedId = doc.root.id;
     this._selectedExtra = new Set(); // 多选附加集合(不含主节点)
+    this._selectionMode = false;     // 移动端选择模式:点按即多选
     this._anchorId = doc.root.id;    // 范围选择的锚点
     this._focusId = null;
     this._focusOffset = null;
@@ -87,6 +88,28 @@ export class Outliner {
     this._selectedExtra.clear();
   }
 
+  /** 移动端选择模式:开启后点按即多选(桌面 Ctrl+点击行为不变) */
+  setSelectionMode(on) {
+    this._selectionMode = !!on;
+    if (!on) this._selectedExtra.clear();
+    this.render();
+  }
+
+  /** 上下移动选中节点(delta=-1/1);多选时整块移动 */
+  moveNodeBy(delta) {
+    if (this._selectedExtra.size > 0) return this.moveSelectedBlock(delta);
+    const f = findNode(this.doc.root, this.selectedId);
+    if (!f || !f.parent) return false;
+    const { parent, index } = f;
+    const target = index + delta;
+    if (target < 0 || target >= parent.children.length) return false;
+    moveNode(parent, index, parent, target);
+    this._saveFocus();
+    this.render();
+    this._emitChange(true);
+    return true;
+  }
+
   setDoc(doc) {
     this.doc = doc;
     this.render();
@@ -115,7 +138,7 @@ export class Outliner {
       }
       // 复选框/标签×/文件等已有自己的点击处理并 stopPropagation
       if (e.target.closest('.node-check, .node-tag-x, .node-file-img, .node-file-chip, .node-link-chip, .node-tag-input, .node-link-input, .node-file-add')) return;
-      const additive = e.ctrlKey || e.metaKey;
+      const additive = e.ctrlKey || e.metaKey || this._selectionMode;
       const range = e.shiftKey;
       const before = this.getSelectedIds().join(',');
       this.setSelection(id, { additive, range });

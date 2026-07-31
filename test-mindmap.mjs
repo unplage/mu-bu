@@ -543,6 +543,44 @@ console.log('--- Mindmap 点击 + 徽章展开 ---');
   assert(container.querySelectorAll('.mm-node').length === 3, '展开后 3 节点');
 }
 
+console.log('--- Mindmap 选择模式 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = '根';
+  doc.root.children.push(createNode('A'));
+  doc.root.children.push(createNode('B'));
+  const aId = doc.root.children[0].id;
+  const bId = doc.root.children[1].id;
+  const container = document.createElement('div');
+  const mm = new Mindmap(container, doc, () => {});
+  mm.render();
+  mm.setSelectionMode(true);
+  mm._select(aId, true);
+  mm._select(bId, true);
+  const ids = mm.getSelectedIds();
+  assert(ids.includes(aId) && ids.includes(bId), '导图选择模式多选');
+  mm.setSelectionMode(false);
+  assert(mm.getSelectedIds().length === 1, '退出选择模式清除附加选中');
+}
+
+console.log('--- Mindmap 长按菜单含编辑项 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = '根';
+  doc.root.children.push(createNode('A'));
+  const aId = doc.root.children[0].id;
+  const container = document.createElement('div');
+  const mm = new Mindmap(container, doc, () => {});
+  mm.render();
+  const f = Tree.findNode(doc.root, aId);
+  mm._showContextMenu({ clientX: 10, clientY: 10, preventDefault() {}, stopPropagation() {} }, f.node, f.parent, f.index);
+  const items = document.body.querySelectorAll('.mm-ctx-menu .mm-ctx-item');
+  const texts = [...items].map((i) => i.textContent);
+  assert(texts.includes('编辑'), '长按菜单含编辑项');
+  assert(texts.includes('添加子节点') && texts.includes('删除节点'), '含增删项');
+  mm._closeContextMenu();
+}
+
 console.log('--- Mindmap 复制/粘贴 ---');
 {
   const doc = createDoc('T');

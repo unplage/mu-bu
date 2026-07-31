@@ -2,9 +2,13 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=no" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <meta name="theme-color" content="#4f8cf0" />
 <meta name="description" content="Mubu-Lite: 幕布风格的 PWA 思维导图与大纲编辑器,本地存储,可离线使用。" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Mubu-Lite" />
+<link rel="apple-touch-icon" href="./icons/icon-192.png" />
 <title>Mubu-Lite</title>
 <style>
 /* ===== Mubu-Lite styles ===== */
@@ -21,13 +25,14 @@
   --mono: "SF Mono", "JetBrains Mono", Consolas, Menlo, monospace;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
 body { font-family: var(--font); color: var(--text); background: var(--bg); -webkit-font-smoothing: antialiased; font-size: 14px; line-height: 1.5; overflow: hidden; }
 button { font-family: inherit; cursor: pointer; }
 input, textarea { font-family: inherit; }
 ::selection { background: #cfe3ff; }
 
-#app { display: flex; height: 100vh; width: 100vw; overflow: hidden; }
+#app { display: flex; height: 100vh; height: 100dvh; width: 100vw; overflow: hidden; }
 .sidebar { width: var(--sidebar-w); flex-shrink: 0; background: var(--sidebar-bg); border-right: 1px solid var(--border); display: flex; flex-direction: column; transition: transform 0.2s ease; z-index: 30; }
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
 
@@ -144,6 +149,9 @@ mark.search-hit { background: #ffe58a; color: inherit; border-radius: 2px; paddi
 .ol-focusbar { position: sticky; top: 0; z-index: 12; display: flex; align-items: center; gap: 8px; background: var(--primary-soft); padding: 6px 16px; border-bottom: 1px solid var(--border); font-size: 13px; }
 .ol-focustitle { color: var(--primary); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ol-status { position: sticky; bottom: 0; z-index: 12; background: var(--bg-elev); border-top: 1px solid var(--border); padding: 4px 16px; font-size: 12px; color: var(--text-faint); }
+.ol-actionbar { position: sticky; bottom: 0; z-index: 12; display: flex; align-items: center; justify-content: center; gap: 6px; background: var(--bg-elev); border-top: 1px solid var(--border); padding: 6px 8px; }
+.ol-actionbar .ol-btn { height: 36px; min-width: 40px; padding: 0 10px; }
+.ol-actionbar .ol-btn.active { background: var(--primary); color: #fff; }
 .toc-panel { position: absolute; top: 0; left: 0; bottom: 0; width: 260px; background: var(--bg-elev); border-right: 1px solid var(--border); z-index: 18; padding: 12px; overflow: hidden; display: flex; flex-direction: column; box-shadow: var(--shadow-lg); }
 .toc-list { flex: 1; overflow-y: auto; font-size: 13px; }
 .toc-item { padding: 3px 6px; border-radius: 4px; cursor: pointer; color: var(--text-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -227,8 +235,28 @@ mark.search-hit { background: #ffe58a; color: inherit; border-radius: 2px; paddi
   .sidebar.open ~ .sidebar-overlay { opacity: 1; pointer-events: auto; }
   .only-mobile { display: inline-flex; }
   .outline-tree { padding: 16px; }
+  .outline-tree { padding-top: 52px; }
+  .outline-tree.search-open { padding-top: 96px; }
+  .outline-tree.tag-open { padding-top: 92px; }
+  .outline-tree.search-open.tag-open { padding-top: 130px; }
   .export-grid { grid-template-columns: 1fr; }
   .doc-title { font-size: 14px; }
+  /* 主工具栏与浮层工具栏横向可滚动,避免溢出被截断 */
+  .toolbar { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .ol-toolbar { left: 8px; right: 8px; top: 8px; max-width: none; overflow-x: auto; -webkit-overflow-scrolling: touch; justify-content: flex-start; }
+  .ol-searchbar { left: 8px; right: 8px; top: 54px; max-width: none; }
+  .ol-tagbar { left: 8px; right: 8px; top: 100px; max-width: none; }
+  /* 触控目标放大 */
+  .icon-btn { width: 40px; height: 40px; }
+  .ol-btn { min-width: 36px; height: 34px; }
+  .mm-btn { min-width: 36px; height: 36px; }
+  .mm-toolbar { top: 12px; right: 8px; padding: 4px; }
+  /* 安全区(刘海屏/Home 指示条) */
+  .ol-status, .mm-status { padding-bottom: calc(4px + env(safe-area-inset-bottom)); }
+  .modal-card { margin-bottom: env(safe-area-inset-bottom); }
+  .ol-actionbar { padding-bottom: calc(6px + env(safe-area-inset-bottom)); }
+  /* 移动端隐藏富文本/排序/聚焦(触屏文本选区不便;纯 CSS 隐藏,不改 JS) */
+  #fmtBold, #fmtItalic, #fmtUnderline, #fmtStrike, #fmtHighlight, #sortBtn, #focusBtn { display: none; }
 }
 </style>
 </head>
@@ -304,6 +332,16 @@ mark.search-hit { background: #ffe58a; color: inherit; border-radius: 2px; paddi
       </div>
       <div id="tagBar" class="ol-tagbar" hidden></div>
       <div id="outlineTree" class="outline-tree" tabindex="0"></div>
+      <div id="olActionBar" class="ol-actionbar only-mobile" hidden>
+        <button id="actUp" class="ol-btn" title="上移">↑</button>
+        <button id="actDown" class="ol-btn" title="下移">↓</button>
+        <button id="actIndent" class="ol-btn" title="缩进">→</button>
+        <button id="actOutdent" class="ol-btn" title="取消缩进">←</button>
+        <button id="actDelete" class="ol-btn" title="删除">🗑</button>
+        <button id="actColor" class="ol-btn" title="配色">🎨</button>
+        <button id="actMulti" class="ol-btn" title="多选">☑</button>
+        <button id="actDone" class="ol-btn" title="完成" hidden>✓</button>
+      </div>
     </section>
 
     <section id="mindmapView" class="view view-mindmap">
@@ -315,6 +353,8 @@ mark.search-hit { background: #ffe58a; color: inherit; border-radius: 2px; paddi
         <button id="mmAddSibling" class="mm-btn" title="添加兄弟">＋兄弟</button>
         <button id="mmDelete" class="mm-btn" title="删除 (Backspace)">🗑 删除</button>
         <button id="mmToggleCollapse" class="mm-btn" title="折叠/展开子节点">⇲ 折叠</button>
+        <button id="mmMulti" class="mm-btn only-mobile" title="多选">☑</button>
+        <button id="mmMultiDone" class="mm-btn only-mobile" title="完成" hidden>✓</button>
         <div class="mm-divider"></div>
         <button id="mmFontSize" class="mm-btn" title="字号">字号</button>
         <button id="mmFontColor" class="mm-btn" title="字体颜色">字色</button>

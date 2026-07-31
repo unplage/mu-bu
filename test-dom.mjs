@@ -433,6 +433,52 @@ console.log('--- Outliner 点击文本不重渲染(保留光标/选区) ---');
   assert(rootText !== rootText2, '点击未选中节点触发重渲染');
 }
 
+console.log('--- Outliner moveNodeBy ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = 'root';
+  doc.root.children.push(createNode('a'));
+  doc.root.children.push(createNode('b'));
+  doc.root.children.push(createNode('c'));
+  const aId = doc.root.children[0].id;
+  const container = document.createElement('div');
+  const outliner = new Outliner(container, doc, () => {});
+  outliner.render();
+  outliner.setSelection(aId, {});
+  assert(outliner.moveNodeBy(1) === true, '下移成功');
+  assert(doc.root.children[1].id === aId, 'a 移到第 2');
+  assert(outliner.moveNodeBy(1) === true, '再下移成功');
+  assert(doc.root.children[2].id === aId, 'a 移到第 3');
+  assert(outliner.moveNodeBy(1) === false, '底部不能再下移');
+  assert(outliner.moveNodeBy(-1) === true, '上移成功');
+  assert(doc.root.children[1].id === aId, 'a 回到第 2');
+}
+
+console.log('--- Outliner 选择模式 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = 'root';
+  doc.root.children.push(createNode('a'));
+  doc.root.children.push(createNode('b'));
+  const aId = doc.root.children[0].id;
+  const bId = doc.root.children[1].id;
+  const container = document.createElement('div');
+  const outliner = new Outliner(container, doc, () => {});
+  outliner.render();
+  outliner.setSelectionMode(true);
+  const clickText = (el) => {
+    const ev = new window.Event('click', { bubbles: true });
+    Object.defineProperty(ev, 'target', { value: el, configurable: true });
+    el.dispatchEvent(ev);
+  };
+  clickText(container.querySelector('.node-text[data-id="' + aId + '"]'));
+  clickText(container.querySelector('.node-text[data-id="' + bId + '"]'));
+  const ids = outliner.getSelectedIds();
+  assert(ids.includes(aId) && ids.includes(bId), '选择模式点按多选 a,b');
+  outliner.setSelectionMode(false);
+  assert(outliner.getSelectedIds().length === 1, '退出选择模式清除附加选中');
+}
+
 console.log('--- Outliner 备注行 ---');
 {
   const doc = createDoc('T');
