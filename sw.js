@@ -1,5 +1,5 @@
 // Mubu-Lite service worker — 缓存优先,后台更新
-const VERSION = 'mubu-v8.7';
+const VERSION = 'mubu-v8.11';
 const ASSETS = [
   './',
   './index.html',
@@ -46,15 +46,12 @@ self.addEventListener('fetch', (e) => {
   }
 
   e.respondWith(
-    caches.match(req).then((cached) => {
-      const net = fetch(req).then((res) => {
-        if (res && res.status === 200) {
-          const copy = res.clone();
-          caches.open(VERSION).then((c) => c.put(req, copy)).catch(() => {});
-        }
-        return res;
-      }).catch(() => cached);
-      return cached || net;
-    })
+    fetch(req).then((res) => {
+      if (res && res.status === 200) {
+        const copy = res.clone();
+        caches.open(VERSION).then((c) => c.put(req, copy)).catch(() => {});
+      }
+      return res;
+    }).catch(() => caches.match(req))
   );
 });

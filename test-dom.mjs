@@ -276,6 +276,98 @@ console.log('--- Outliner 富文本 input 重建 spans ---');
   assert(doc.root.text === 'ab', 'text 保持 ab');
 }
 
+console.log('--- Outliner execCommand 产物(<b>)文本不丢失 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = 'ab';
+  const container = document.createElement('div');
+  const outliner = new Outliner(container, doc, () => {});
+  outliner.render();
+  const textEl = container.querySelector('.node-text[data-id="' + doc.root.id + '"]');
+  // Chrome execCommand('bold') 选中 'llo' 的产物:文本被 <b> 包裹
+  textEl.innerHTML = 'He<b>llo</b>';
+  textEl.dispatchEvent(new window.Event('input'));
+  assert(doc.root.text === 'Hello', 'text 保留 <b> 内文本, got ' + JSON.stringify(doc.root.text));
+  const spans = doc.root.spans;
+  assert(Array.isArray(spans) && spans[1].b === true, 'spans 记录加粗片段, got ' + JSON.stringify(spans));
+}
+
+console.log('--- Outliner 回车拆分保留加粗(末尾) ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = 'root';
+  const a = createNode('Hello');
+  a.spans = [{ text: 'He', color: null, b: false }, { text: 'llo', color: null, b: true }];
+  doc.root.children.push(a);
+  const aId = a.id;
+  const container = document.createElement('div');
+  const outliner = new Outliner(container, doc, () => {});
+  outliner.render();
+  // 光标在末尾(offset=5)
+  const selRange = {
+    cloneRange: () => selRange, selectNodeContents: () => {}, setEnd: () => {}, setStart: () => {}, collapse: () => {},
+    cloneContents: () => ({ childNodes: [{ nodeType: Node.TEXT_NODE, textContent: 'Hello' }] }),
+  };
+  window.getSelection = () => ({ rangeCount: 1, getRangeAt: () => selRange, removeAllRanges: () => {}, addRange: () => {} });
+  const aText = container.querySelector('.node-text[data-id="' + aId + '"]');
+  outliner._onKey(fakeKeyEvent('Enter', aText));
+  assert(a.text === 'Hello', '原节点文本不变, got ' + JSON.stringify(a.text));
+  assert(a.spans && a.spans.map((s) => s.text).join('') === 'Hello' && a.spans.some((s) => s.b), '原节点加粗保留, got ' + JSON.stringify(a.spans));
+  assert(doc.root.children.length === 2 && doc.root.children[1].text === '', '生成空的新节点');
+}
+
+console.log('--- Outliner 回车拆分保留加粗(span 边界) ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = 'root';
+  const a = createNode('Hello');
+  a.spans = [{ text: 'He', color: null, b: false }, { text: 'llo', color: null, b: true }];
+  doc.root.children.push(a);
+  const aId = a.id;
+  const container = document.createElement('div');
+  const outliner = new Outliner(container, doc, () => {});
+  outliner.render();
+  // 光标在 He|llo 边界(offset=2)
+  const selRange = {
+    cloneRange: () => selRange, selectNodeContents: () => {}, setEnd: () => {}, setStart: () => {}, collapse: () => {},
+    cloneContents: () => ({ childNodes: [{ nodeType: Node.TEXT_NODE, textContent: 'He' }] }),
+  };
+  window.getSelection = () => ({ rangeCount: 1, getRangeAt: () => selRange, removeAllRanges: () => {}, addRange: () => {} });
+  const aText = container.querySelector('.node-text[data-id="' + aId + '"]');
+  outliner._onKey(fakeKeyEvent('Enter', aText));
+  const next = doc.root.children[1];
+  assert(a.text === 'He', '前半文本 He, got ' + JSON.stringify(a.text));
+  assert(a.spans === null, '前半无样式时 spans 为 null');
+  assert(next.text === 'llo', '后半文本 llo, got ' + JSON.stringify(next.text));
+  assert(next.spans && next.spans[0].b === true, '后半继承加粗, got ' + JSON.stringify(next.spans));
+}
+
+console.log('--- Outliner 回车拆分保留加粗(span 内部) ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = 'root';
+  const a = createNode('Hello');
+  a.spans = [{ text: 'He', color: null, b: false }, { text: 'llo', color: null, b: true }];
+  doc.root.children.push(a);
+  const aId = a.id;
+  const container = document.createElement('div');
+  const outliner = new Outliner(container, doc, () => {});
+  outliner.render();
+  // 光标在 bold 段内部(offset=3)
+  const selRange = {
+    cloneRange: () => selRange, selectNodeContents: () => {}, setEnd: () => {}, setStart: () => {}, collapse: () => {},
+    cloneContents: () => ({ childNodes: [{ nodeType: Node.TEXT_NODE, textContent: 'Hel' }] }),
+  };
+  window.getSelection = () => ({ rangeCount: 1, getRangeAt: () => selRange, removeAllRanges: () => {}, addRange: () => {} });
+  const aText = container.querySelector('.node-text[data-id="' + aId + '"]');
+  outliner._onKey(fakeKeyEvent('Enter', aText));
+  const next = doc.root.children[1];
+  assert(a.text === 'Hel', '前半文本 Hel, got ' + JSON.stringify(a.text));
+  assert(a.spans && a.spans.map((s) => s.text).join('') === 'Hel' && a.spans[1].b, '前半保留部分加粗, got ' + JSON.stringify(a.spans));
+  assert(next.text === 'lo', '后半文本 lo, got ' + JSON.stringify(next.text));
+  assert(next.spans && next.spans[0].text === 'lo' && next.spans[0].b === true, '后半继承加粗, got ' + JSON.stringify(next.spans));
+}
+
 console.log('--- Outliner 待办复选框 ---');
 {
   const doc = createDoc('T');

@@ -187,6 +187,30 @@ console.log('--- Mindmap 选中态边框 ---');
   assert(rects[0].getAttribute('stroke-width') === '2', '未选中 root 边框宽 2');
 }
 
+console.log('--- Mindmap 连续点击选中态边框切换 ---');
+{
+  const doc = createDoc('T');
+  doc.root.text = '根';
+  doc.root.children.push(createNode('A'));
+  doc.root.children.push(createNode('B'));
+  const aId = doc.root.children[0].id;
+  const bId = doc.root.children[1].id;
+  const container = document.createElement('div');
+  const mm = new Mindmap(container, doc, () => {});
+  mm.render();
+  // 点击 A:root 恢复普通边框,A 显示蓝框
+  mm._select(aId);
+  let rects = container.querySelectorAll('.mm-node-rect');
+  assert(rects[1].getAttribute('stroke') === '#4f8cf0' && rects[1].getAttribute('stroke-width') === '3', '点击 A 后 A 显示蓝框');
+  assert(rects[0].getAttribute('stroke') !== '#4f8cf0', '点击 A 后 root 蓝框已清除');
+  // 再点击 B:上一节点 A 恢复普通边框,B 显示蓝框
+  mm._select(bId);
+  rects = container.querySelectorAll('.mm-node-rect');
+  assert(rects[2].getAttribute('stroke') === '#4f8cf0' && rects[2].getAttribute('stroke-width') === '3', '点击 B 后 B 显示蓝框');
+  assert(rects[1].getAttribute('stroke') !== '#4f8cf0', '点击 B 后 A 蓝框已清除');
+  assert(mm.selectedId === bId, 'selectedId 更新为 B');
+}
+
 console.log('--- Mindmap 节点高度自适应 ---');
 {
   const doc = createDoc('T');

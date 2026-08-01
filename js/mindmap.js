@@ -262,9 +262,10 @@ export class Mindmap {
       return;
     }
     if (this.selectedId === id && this._selectedExtra.size === 0) return;
-    this._syncSelectionAttrs(this.selectedId, id);
+    const prevId = this.selectedId;
     this._selectedExtra.clear();
     this.selectedId = id;
+    this._syncSelectionAttrs(prevId, id);
   }
 
   /** 批量删除选中节点 */

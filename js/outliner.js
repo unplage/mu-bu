@@ -1202,14 +1202,15 @@ function nextVisibleId(root, id) {
 
 // ---------- 光标与文本 ----------
 function textToModel(textEl) {
-  // 将 <br> 与 <div> 转为 \n;span 标签也提取文本
+  // 递归收集所有后代文本(<b>/<strong>/<i> 等 execCommand 产物);<br> 与 <div> 转 \n
   let out = '';
-  textEl.childNodes.forEach((n, i) => {
+  const walk = (n) => {
     if (n.nodeType === Node.TEXT_NODE) out += n.textContent;
     else if (n.nodeName === 'BR') out += '\n';
-    else if (n.nodeName === 'DIV') out += (i ? '\n' : '') + n.textContent;
-    else if (n.nodeName === 'SPAN') out += n.textContent;
-  });
+    else if (n.nodeName === 'DIV') out += (out && !out.endsWith('\n') ? '\n' : '');
+    else n.childNodes.forEach(walk);
+  };
+  textEl.childNodes.forEach(walk);
   return out;
 }
 
@@ -1219,14 +1220,19 @@ function splitSpansAtOffset(spans, offset, newText, isAfter) {
   const result = [];
   let pos = 0;
   for (const sp of spans) {
+    const spStart = pos;
     const spEnd = pos + sp.text.length;
-    if (spEnd <= offset) { pos = spEnd; continue; }
-    if (pos >= offset) { result.push(copySpan(sp, sp.text)); pos = spEnd; continue; }
-    // span 跨越分割点
-    const beforeText = sp.text.slice(0, offset - pos);
-    const afterText = sp.text.slice(offset - pos);
-    if (!isAfter && beforeText) result.push(copySpan(sp, beforeText));
-    if (isAfter && afterText) result.push(copySpan(sp, afterText));
+    if (isAfter) {
+      // 后半段:丢弃完全在 offset 之前的 span,裁掉跨越部分的头部
+      if (spEnd <= offset) { pos = spEnd; continue; }
+      const seg = sp.text.slice(Math.max(0, offset - spStart));
+      if (seg) result.push(copySpan(sp, seg));
+    } else {
+      // 前半段:丢弃完全在 offset 之后的 span,裁掉跨越部分的尾部
+      if (spStart >= offset) break;
+      const seg = sp.text.slice(0, Math.min(sp.text.length, offset - spStart));
+      if (seg) result.push(copySpan(sp, seg));
+    }
     pos = spEnd;
   }
   return result.length > 0 && result.some(spanStyled) ? result : null;

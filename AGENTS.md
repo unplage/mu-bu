@@ -56,7 +56,7 @@ node test-mindmap.mjs     # 思维导图渲染，33 项
 - 背景色支持预设 key（16 色）和直接 hex 字符串。`shade()` 对 hex 生成浅色版（85% 白色混合）。
 - 导出 SVG/PNG：clone 后移除 `<g>` transform 再计算 viewBox，确保内容完整。
 - 右键菜单：导图节点右键弹出完整菜单（加子/兄弟/删除/折叠/放左/放右/自动）。
-- PWA：`sw.js` 缓存优先 + 后台更新，导航失败回退 `./index.html`；改 JS 必须同步 bump `VERSION`。
+- PWA：`sw.js` 网络优先 + 离线回退缓存（`fetch` 优先取网，失败回退 `caches`），导航失败回退 `./index.html`；改 JS 必须同步 bump `VERSION`。
 - `mubu.html` 与 `index.html` 仅标题不同（重复入口），`sw.js` 只引用后者。
 
 ## PyQt5 桌面版
