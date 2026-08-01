@@ -185,10 +185,13 @@ export class Mindmap {
         this._applyTransform();
       }
     }, { passive: false });
-    c.addEventListener('touchend', () => {
+    c.addEventListener('touchend', (e) => {
       clearTimeout(this._longPressTimer);
       touchData = null;
-    });
+      // 长按松手:抑制兼容 mouse 事件,避免右键菜单被紧随的 mousedown 误关/误触节点
+      if (this._longPressTriggered) e.preventDefault();
+      this._longPressTriggered = false;
+    }, { passive: false });
 
     c.tabIndex = 0;
     c.addEventListener('keydown', (e) => this._onKey(e));
