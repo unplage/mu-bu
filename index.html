@@ -174,6 +174,8 @@ mark.search-hit { background: #ffe58a; color: inherit; border-radius: 2px; paddi
 
 .mm-node-rect { transition: fill 0.15s, stroke 0.15s; }
 .mm-node-text { pointer-events: none; user-select: none; }
+.mindmap-canvas, .mm-hint, .mm-status, .mm-toolbar, .mm-ctx-menu, .mm-ctx-item { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.mm-edit { user-select: text; -webkit-user-select: text; -webkit-touch-callout: default; }
 .mm-edge { fill: none; stroke-width: 1.5; }
 .mm-node.is-dragging { opacity: 0.35; }
 .mm-node.mm-drop-child .mm-node-rect { stroke: #4f8cf0 !important; stroke-width: 3 !important; }
