@@ -186,6 +186,10 @@ export class Mindmap {
       }
     }, { passive: false });
     c.addEventListener('touchend', (e) => {
+      // 编辑中点击 mm-edit 外部(画布/其他节点):立即提交,不依赖 iOS 的 blur
+      if (this.editingId && this._commitEdit && !e.target.closest('.mm-edit')) {
+        this._commitEdit();
+      }
       clearTimeout(this._longPressTimer);
       touchData = null;
       // 长按松手:抑制兼容 mouse 事件,避免右键菜单被紧随的 mousedown 误关/误触节点
@@ -609,9 +613,11 @@ export class Mindmap {
             this.onChange(this.doc, true);
           }
           this.editingId = null;
+          this._commitEdit = null;
           this.render();
           this._applyTransform();
         };
+        this._commitEdit = commit;
         ta.addEventListener('blur', () => {
           const popover = document.getElementById('fontColorPopover');
           if (popover && !popover.hidden) return;
@@ -622,7 +628,7 @@ export class Mindmap {
           if (ev.isComposing || ev.keyCode === 229) return;
           if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); commit(); }
           else if (ev.key === 'Enter') { ev.preventDefault(); document.execCommand?.('insertLineBreak', false, null); this._editingDraft = ta.innerHTML; }
-          if (ev.key === 'Escape') { ev.preventDefault(); this.editingId = null; this.render(); this._applyTransform(); }
+          if (ev.key === 'Escape') { ev.preventDefault(); this.editingId = null; this._commitEdit = null; this.render(); this._applyTransform(); }
           ev.stopPropagation();
         });
         continue;
