@@ -583,7 +583,17 @@ export class Mindmap {
             sel.addRange(range);
           } catch (_) { /* 某些环境无完整 Selection/Range 实现,忽略 */ }
         });
-        ta.addEventListener('input', () => { this._editingDraft = ta.innerHTML; });
+        ta.addEventListener('input', () => {
+          this._editingDraft = ta.innerHTML;
+          // 实时同步模型(与大纲一致):即使 blur/touchend 未触发,改动也已落库
+          const f = findNode(this.doc.root, n.id);
+          if (f) {
+            const txt = contentText(ta).replace(/^\n+|\n+$/g, '');
+            f.node.text = txt || '空节点';
+            f.node.spans = txt ? spansFromDom(ta) : null;
+            this.onChange(this.doc, false);
+          }
+        });
         // 粘贴只保留纯文本,换行转 <br>,避免污染 spans 重建
         ta.addEventListener('paste', (e) => {
           e.preventDefault();

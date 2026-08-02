@@ -1108,7 +1108,8 @@ class App {
   _bindResize() {
     // 视图切换或窗口变化时重绘思维导图
     window.addEventListener('resize', debounce(() => {
-      if (this.view === 'mindmap' && this.mindmap) {
+      // 编辑中跳过重绘:安卓键盘弹出/收起触发 resize,重建 mm-edit 会打断输入焦点
+      if (this.view === 'mindmap' && this.mindmap && !this.mindmap.editingId) {
         this.mindmap.render();
         this.mindmap._applyTransform();
       }
