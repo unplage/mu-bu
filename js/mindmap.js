@@ -196,6 +196,7 @@ export class Mindmap {
     c.tabIndex = 0;
     c.addEventListener('keydown', (e) => this._onKey(e));
     c.addEventListener('contextmenu', (e) => {
+      if (this._longPressTriggered) return;
       const g = e.target.closest('.mm-node');
       if (!g) { this._closeContextMenu(); return; }
       e.preventDefault();
@@ -408,7 +409,14 @@ export class Mindmap {
       b.className = 'mm-ctx-item';
       b.textContent = label;
       b.disabled = disabled;
-      if (!disabled) b.addEventListener('click', () => { this._closeContextMenu(); fn(); });
+      if (!disabled) {
+        b.addEventListener('click', () => { this._closeContextMenu(); fn(); });
+        b.addEventListener('touchend', (ev) => {
+          ev.preventDefault();
+          this._closeContextMenu();
+          fn();
+        });
+      }
       menu.append(b);
     };
 
@@ -443,7 +451,10 @@ export class Mindmap {
 
   _closeContextMenu() {
     if (this._ctxMenu) { this._ctxMenu.remove(); this._ctxMenu = null; }
-    if (this._ctxClose) { this._ctxClose = null; }
+    if (this._ctxClose) {
+      document.removeEventListener('mousedown', this._ctxClose);
+      this._ctxClose = null;
+    }
   }
 
   _applyTransform() {
@@ -601,7 +612,11 @@ export class Mindmap {
           this.render();
           this._applyTransform();
         };
-        ta.addEventListener('blur', commit);
+        ta.addEventListener('blur', () => {
+          const popover = document.getElementById('fontColorPopover');
+          if (popover && !popover.hidden) return;
+          commit();
+        });
         ta.addEventListener('keydown', (ev) => {
           // 输入法组合期不提交
           if (ev.isComposing || ev.keyCode === 229) return;

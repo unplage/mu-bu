@@ -171,7 +171,6 @@ class App {
       fmtItalic: $('#fmtItalic'),
       fmtUnderline: $('#fmtUnderline'),
       fmtStrike: $('#fmtStrike'),
-      fmtHighlight: $('#fmtHighlight'),
       fmtColor: $('#fmtColor'),
       sortBtn: $('#sortBtn'),
       sortPopover: $('#sortPopover'),
@@ -298,7 +297,6 @@ class App {
       [this.el.fmtItalic, 'italic'],
       [this.el.fmtUnderline, 'underline'],
       [this.el.fmtStrike, 'strikeThrough'],
-      [this.el.fmtHighlight, 'hiliteColor'],
     ]) {
       btn.addEventListener('mousedown', fmtCmd(cmd).mousedown);
       btn.addEventListener('click', fmtCmd(cmd).click);
@@ -723,6 +721,9 @@ class App {
   _initFontColorGrid() {
     if (this._fontColorGridInited) return;
     this._fontColorGridInited = true;
+    this.el.fontColorPopover.addEventListener('mousedown', (e) => {
+      if (e.target !== this.el.fontColorHex) e.preventDefault();
+    });
     import('./utils.js').then(({ FONT_COLORS }) => {
       this.el.fontColorGrid.replaceChildren(
         ...FONT_COLORS.map((c) => el('div', {
