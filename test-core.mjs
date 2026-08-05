@@ -461,5 +461,128 @@ console.log('--- validateDoc 画布背景字段 ---');
   assert(old.bg === null, '旧文档无 bg 字段兜底为 null');
 }
 
+console.log('--- importMarkdown 基础 ---');
+{
+  const md = `# 测试文档
+
+- 第一项
+- 第二项
+  - 子项A
+  - 子项B
+- 第三项`;
+  const doc = Export.importMarkdown(md);
+  assert(doc.title === '测试文档', 'title from h1');
+  assert(doc.root.children.length === 3, '3 top children');
+  assert(doc.root.children[0].text === '第一项', 'first item');
+  assert(doc.root.children[1].text === '第二项', 'second item');
+  assert(doc.root.children[1].children.length === 2, 'nested children');
+  assert(doc.root.children[1].children[0].text === '子项A', 'child A');
+}
+
+console.log('--- importMarkdown 多级标题 ---');
+{
+  const md = `## 二级标题
+
+    - 子1
+    - 子2`;
+  const doc = Export.importMarkdown(md);
+  assert(doc.root.children[0].text === '二级标题', 'h2 as child');
+  assert(doc.root.children[0].children.length === 2, 'h2 has 2 children');
+}
+
+console.log('--- importMarkdown 空输入 ---');
+{
+  const doc = Export.importMarkdown('');
+  assert(doc.title === '导入文档', 'empty → default title');
+  assert(doc.root.children.length === 0, 'no children');
+}
+
+console.log('--- importText 基础 ---');
+{
+  const txt = `我的文档
+- 第一项
+  - 子项A
+- 第二项`;
+  const doc = Export.importText(txt);
+  assert(doc.title === '我的文档', 'title from first line');
+  assert(doc.root.children.length === 2, '2 top children');
+  assert(doc.root.children[0].text === '第一项', 'first item');
+  assert(doc.root.children[0].children[0].text === '子项A', 'child A');
+}
+
+console.log('--- importText 无标记 ---');
+{
+  const txt = `项目计划
+设计
+  前端
+  后端
+测试`;
+  const doc = Export.importText(txt);
+  assert(doc.title === '项目计划', 'title');
+  assert(doc.root.children.length === 2, '2 top children');
+  assert(doc.root.children[0].children.length === 2, '设计 has 2 children');
+}
+
+console.log('--- importText 空输入 ---');
+{
+  const doc = Export.importText('');
+  assert(doc.title === '导入文档', 'empty → default title');
+  assert(doc.root.children.length === 0, 'no children');
+}
+
+console.log('--- importHTML 基础 ---');
+{
+  if (typeof DOMParser !== 'undefined') {
+    const html = `<html><body>
+<h1>测试文档</h1>
+<ul>
+  <li>第一项</li>
+  <li>第二项</li>
+  <li>第三项</li>
+</ul>
+</body></html>`;
+    const doc = Export.importHTML(html);
+    assert(doc.title === '测试文档', 'title from h1');
+    assert(doc.root.children.length === 3, '3 children');
+    assert(doc.root.children[0].text === '第一项', 'first li');
+  } else {
+    console.log('  (skip importHTML: DOMParser unavailable in Node)');
+  }
+}
+
+console.log('--- importHTML 嵌套列表 ---');
+{
+  if (typeof DOMParser !== 'undefined') {
+    const html = `<html><body>
+<h1>嵌套</h1>
+<ul>
+  <li>父项
+    <ul>
+      <li>子项A</li>
+      <li>子项B</li>
+    </ul>
+  </li>
+</ul>
+</body></html>`;
+    const doc = Export.importHTML(html);
+    assert(doc.root.children[0].text.includes('父项'), 'parent item');
+    assert(doc.root.children[0].children.length === 2, 'nested children');
+  } else {
+    console.log('  (skip importHTML: DOMParser unavailable in Node)');
+  }
+}
+
+console.log('--- importHTML 无 h1 ---');
+{
+  if (typeof DOMParser !== 'undefined') {
+    const html = `<html><body><ul><li>A</li></ul></body></html>`;
+    const doc = Export.importHTML(html);
+    assert(doc.title === '导入文档', 'no h1 → default title');
+    assert(doc.root.children[0].text === 'A', 'child preserved');
+  } else {
+    console.log('  (skip importHTML: DOMParser unavailable in Node)');
+  }
+}
+
 console.log(`\n=== ${pass} passed, ${fail} failed ===`);
 process.exit(fail ? 1 : 0);

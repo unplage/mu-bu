@@ -1,5 +1,6 @@
-// export.js — 导入导出(JSON / Markdown / OPML / TXT / PNG / SVG)
+// export.js — 导入导出(JSON / Markdown / OPML / TXT / PNG / SVG / HTML)
 import { download, escapeHtml } from './utils.js';
+import { createNode } from './db.js';
 
 const NODE_COLORS = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple', 'pink',
   'beige', 'lavender', 'mint', 'brown', 'gray', 'deepRed', 'deepBlue', 'deepGreen'];
@@ -192,6 +193,132 @@ export function importOPML(text) {
     updatedAt: Date.now(),
     root: parseNode(rootOutline),
   };
+}
+
+/** 从 Markdown 文本导入 */
+export function importMarkdown(text) {
+  const lines = text.trim().split('\n');
+  let title = '导入文档';
+  const root = createNode(title);
+  const stack = [{ node: root, depth: -1 }];
+
+  for (const line of lines) {
+    const stripped = line.trimStart();
+    if (!stripped) continue;
+
+    const headingMatch = stripped.match(/^(#{1,6})\s+(.*)/);
+    if (headingMatch) {
+      const depth = headingMatch[1].length;
+      const text = headingMatch[2].trim();
+      if (depth === 1 && title === '导入文档') {
+        title = text;
+        root.text = text;
+        continue;
+      }
+      while (stack.length > 1 && stack[stack.length - 1].depth >= depth) stack.pop();
+      const child = createNode(text);
+      stack[stack.length - 1].node.children.push(child);
+      stack.push({ node: child, depth });
+      continue;
+    }
+
+    const listMatch = stripped.match(/^[-*+]\s+(.*)/);
+    if (listMatch) {
+      const indent = line.length - line.trimStart().length;
+      const text = listMatch[1].trim();
+      while (stack.length > 1 && stack[stack.length - 1].depth >= indent) stack.pop();
+      const child = createNode(text);
+      stack[stack.length - 1].node.children.push(child);
+      stack.push({ node: child, depth: indent });
+    }
+  }
+
+  return validateDoc({
+    id: 'doc_' + Date.now().toString(36),
+    title,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    root,
+  });
+}
+
+/** 从纯文本导入(按缩进解析层级) */
+export function importText(text) {
+  const lines = text.split('\n');
+  let title = '导入文档';
+  const root = createNode(title);
+  const stack = [{ node: root, depth: -1 }];
+
+  for (const line of lines) {
+    const stripped = line.trimStart();
+    if (!stripped) continue;
+
+    if (title === '导入文档') {
+      title = stripped.trim();
+      root.text = title;
+      continue;
+    }
+
+    const indent = line.length - stripped.length;
+    while (stack.length > 1 && stack[stack.length - 1].depth >= indent) stack.pop();
+    const content = stripped.replace(/^[-–—•·*]\s+/, '').trim();
+    if (!content) continue;
+    const child = createNode(content);
+    stack[stack.length - 1].node.children.push(child);
+    stack.push({ node: child, depth: indent });
+  }
+
+  return validateDoc({
+    id: 'doc_' + Date.now().toString(36),
+    title,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    root,
+  });
+}
+
+/** 从 HTML 文本导入(提取标题和列表) */
+export function importHTML(text) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(text, 'text/html');
+  const titleEl = doc.querySelector('h1');
+  const title = titleEl ? titleEl.textContent.trim() : '导入文档';
+  const root = createNode(title);
+
+  const parseList = (listEl) => {
+    const items = [];
+    for (const child of listEl.children) {
+      if (child.tagName !== 'LI') continue;
+      const node = createNode(child.textContent.trim());
+      for (const sub of child.children) {
+        if (sub.tagName === 'UL' || sub.tagName === 'OL') {
+          node.children = [];
+          for (const c of sub.children) {
+            if (c.tagName === 'LI') {
+              const subNode = createNode(c.textContent.trim());
+              node.children.push(subNode);
+            }
+          }
+        }
+      }
+      items.push(node);
+    }
+    return items;
+  };
+
+  const body = doc.querySelector('body') || doc;
+  for (const el of body.querySelectorAll('ul, ol')) {
+    if (el.closest('li')) continue;
+    root.children.push(...parseList(el));
+  }
+
+  return validateDoc({
+    id: 'doc_' + Date.now().toString(36),
+    title,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    root,
+  });
 }
 
 /** 序列化 SVG(内联样式 + 依据内容计算 viewBox/尺寸,保证导出完整) */

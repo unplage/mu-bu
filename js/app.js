@@ -477,6 +477,12 @@ class App {
         docs = Export.importJSON(text); // 内部做结构校验与归一化
       } else if (file.name.endsWith('.opml') || file.name.endsWith('.xml')) {
         docs = [Export.importOPML(text)];
+      } else if (file.name.endsWith('.md') || file.name.endsWith('.markdown')) {
+        docs = [Export.importMarkdown(text)];
+      } else if (file.name.endsWith('.txt')) {
+        docs = [Export.importText(text)];
+      } else if (file.name.endsWith('.html') || file.name.endsWith('.htm')) {
+        docs = [Export.importHTML(text)];
       } else {
         this.toast('不支持的文件格式');
         return;
