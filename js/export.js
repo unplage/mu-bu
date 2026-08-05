@@ -277,10 +277,54 @@ export function importText(text) {
   });
 }
 
-/** 从 HTML 文本导入(提取标题和列表) */
+/** 从 HTML 文本导入(支持幕布格式和标准 HTML) */
 export function importHTML(text) {
   const parser = new DOMParser();
   const doc = parser.parseFromString(text, 'text/html');
+  const isMubu = !!doc.querySelector('.node-list');
+
+  if (isMubu) return importMubuHTML(doc);
+  return importStandardHTML(doc);
+}
+
+/** 幕布 HTML 格式解析 */
+function importMubuHTML(doc) {
+  const titleEl = doc.querySelector('.title');
+  const title = titleEl ? titleEl.textContent.trim() : '导入文档';
+  const root = createNode(title);
+
+  const parseNode = (li) => {
+    const contentEl = li.querySelector(':scope > .content');
+    const noteEl = li.querySelector(':scope > .note');
+    const node = createNode(contentEl ? contentEl.textContent.trim() : '');
+    if (noteEl) node.note = noteEl.textContent.trim();
+    const childrenList = li.querySelector(':scope > .children > .node-list');
+    if (childrenList) {
+      for (const childLi of childrenList.querySelectorAll(':scope > .node')) {
+        node.children.push(parseNode(childLi));
+      }
+    }
+    return node;
+  };
+
+  const topList = doc.querySelector('.node-list');
+  if (topList) {
+    for (const li of topList.querySelectorAll(':scope > .node')) {
+      root.children.push(parseNode(li));
+    }
+  }
+
+  return validateDoc({
+    id: 'doc_' + Date.now().toString(36),
+    title,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    root,
+  });
+}
+
+/** 标准 HTML 格式解析 */
+function importStandardHTML(doc) {
   const titleEl = doc.querySelector('h1');
   const title = titleEl ? titleEl.textContent.trim() : '导入文档';
   const root = createNode(title);

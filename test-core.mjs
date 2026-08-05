@@ -584,5 +584,92 @@ console.log('--- importHTML 无 h1 ---');
   }
 }
 
+console.log('--- importHTML 幕布格式 基础 ---');
+{
+  if (typeof DOMParser !== 'undefined') {
+    const html = `<html><body>
+<div class="title">幕布测试</div>
+<ul class="node-list">
+  <li class="node">
+    <div class="content"><span>节点A</span></div>
+    <div class="children"><ul class="node-list">
+      <li class="node">
+        <div class="content"><span>子节点A1</span></div>
+      </li>
+      <li class="node">
+        <div class="content"><span>子节点A2</span></div>
+      </li>
+    </ul></div>
+  </li>
+  <li class="node">
+    <div class="content"><span>节点B</span></div>
+  </li>
+</ul>
+</body></html>`;
+    const doc = Export.importHTML(html);
+    assert(doc.title === '幕布测试', 'title from .title');
+    assert(doc.root.children.length === 2, '2 top children');
+    assert(doc.root.children[0].text === '节点A', 'first node');
+    assert(doc.root.children[0].children.length === 2, 'A has 2 children');
+    assert(doc.root.children[0].children[0].text === '子节点A1', 'child A1');
+    assert(doc.root.children[1].text === '节点B', 'second node');
+  } else {
+    console.log('  (skip importHTML 幕布格式: DOMParser unavailable in Node)');
+  }
+}
+
+console.log('--- importHTML 幕布格式 含 note ---');
+{
+  if (typeof DOMParser !== 'undefined') {
+    const html = `<html><body>
+<div class="title">含备注</div>
+<ul class="node-list">
+  <li class="node">
+    <div class="content"><span>有备注的节点</span></div>
+    <div class="note"><span>这是备注内容</span></div>
+  </li>
+  <li class="node">
+    <div class="content"><span>无备注的节点</span></div>
+  </li>
+</ul>
+</body></html>`;
+    const doc = Export.importHTML(html);
+    assert(doc.root.children[0].note === '这是备注内容', 'note extracted');
+    assert(doc.root.children[1].note === '', 'no note is empty');
+  } else {
+    console.log('  (skip importHTML 幕布格式 note: DOMParser unavailable in Node)');
+  }
+}
+
+console.log('--- importHTML 幕布格式 多层嵌套 ---');
+{
+  if (typeof DOMParser !== 'undefined') {
+    const html = `<html><body>
+<div class="title">多层</div>
+<ul class="node-list">
+  <li class="node">
+    <div class="content"><span>L1</span></div>
+    <div class="children"><ul class="node-list">
+      <li class="node">
+        <div class="content"><span>L2</span></div>
+        <div class="children"><ul class="node-list">
+          <li class="node">
+            <div class="content"><span>L3</span></div>
+          </li>
+        </ul></div>
+      </li>
+    </ul></div>
+  </li>
+</ul>
+</body></html>`;
+    const doc = Export.importHTML(html);
+    assert(doc.root.children[0].text === 'L1', 'L1');
+    assert(doc.root.children[0].children[0].text === 'L2', 'L2');
+    assert(doc.root.children[0].children[0].children[0].text === 'L3', 'L3');
+  } else {
+    console.log('  (skip importHTML 幕布格式 多层: DOMParser unavailable in Node)');
+  }
+}
+
 console.log(`\n=== ${pass} passed, ${fail} failed ===`);
 process.exit(fail ? 1 : 0);
